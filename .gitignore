@@ -1,0 +1,36 @@
+# Root
+.env
+.env.local
+.env.*.local
+.neon
+node_modules/
+dist/
+build/
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+.eggs/
+*.egg-info/
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+
+# Backend
+backend/uploads/
+backend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.neon
