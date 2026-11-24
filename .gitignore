@@ -1,36 +1,71 @@
-# Root
+# Environment variables & secrets (keep *.env.example templates)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Neon CLI local link
 .neon
-node_modules/
-dist/
-build/
-*.pyc
+
+# Python / Backend
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .eggs/
 *.egg-info/
-.venv/
-venv/
-.DS_Store
-Thumbs.db
+*.db
+*.sqlite
+*.sqlite3
 
-# Backend
+# Uploaded resumes & runtime storage
+uploads/
 backend/uploads/
-backend/.env
 
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.local
+# Node / Frontend / Build outputs
+node_modules/
+dist/
+dist-ssr/
+build/
+*.tsbuildinfo
+.vite/
+.vercel/
+.cache/
 
-# IDE
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors & IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
-.neon
+*~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
