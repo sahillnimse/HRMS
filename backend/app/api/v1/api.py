@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import audit, auth, candidates, jobs, resumes, skills
+from app.api.v1.endpoints import audit, auth, candidates, jobs, privacy, resumes, skills
 
 api_router = APIRouter()
 
@@ -13,3 +13,4 @@ api_router.include_router(jobs.jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(jobs.applications_router, prefix="/applications", tags=["applications"])
 api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["audit-logs"])
+api_router.include_router(privacy.router, prefix="/privacy", tags=["privacy"])

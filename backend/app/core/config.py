@@ -54,10 +54,17 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: Optional[str] = None
     S3_PREFIX: str = "resumes"
 
-    # --- Orphan Resume Cleanup ---
+    # --- Orphan Resume Cleanup & Retention (Phase 0 & Phase 3) ---
     ORPHAN_MAX_AGE_HOURS: int = 24
     ORPHAN_CLEANUP_INTERVAL_MINUTES: int = 60
     ENABLE_CLEANUP_SCHEDULER: bool = True
+    RETENTION_DAYS: int = 365  # 0 disables automatic candidate retention purge
+
+    # --- Bulk Upload & OCR Fallback (Phase 3) ---
+    ENABLE_OCR_FALLBACK: bool = True
+    OCR_MIN_TEXT_LENGTH: int = 40
+    BULK_UPLOAD_MAX_FILES: int = 25
+    REDIS_URL: Optional[str] = None  # Optional Redis/ARQ queue URL; falls back to BackgroundTasks
 
     # --- Duplicate Detection ---
     DUPLICATE_NAME_SIMILARITY_THRESHOLD: float = 0.6

@@ -6,13 +6,13 @@ import type {
 } from '@/types'
 
 const AVATAR_GRADIENTS = [
-  'from-indigo-500 to-violet-500',
-  'from-sky-500 to-indigo-500',
-  'from-emerald-500 to-teal-500',
-  'from-rose-500 to-pink-500',
-  'from-amber-500 to-orange-500',
-  'from-violet-500 to-fuchsia-500',
-  'from-cyan-500 to-blue-500',
+  'from-brand-500 to-teal-700',
+  'from-coral-400 to-rose-500',
+  'from-amber-400 to-orange-500',
+  'from-sky-500 to-cyan-600',
+  'from-emerald-500 to-brand-600',
+  'from-teal-500 to-sky-600',
+  'from-rose-400 to-coral-500',
 ]
 
 export function getInitials(name: string): string {
@@ -128,6 +128,8 @@ export function normalizeProfile(src: ProfileSource): ParsedResumeData {
     preferred_locations: toStringList(src.preferred_locations),
     open_to_relocate:
       typeof src.open_to_relocate === 'boolean' ? src.open_to_relocate : null,
+    consent_given_at: src.consent_given_at ?? null,
+    source: src.source || 'upload',
     raw_parsed_data: src.raw_parsed_data ?? {},
   }
 }
@@ -201,6 +203,8 @@ export function toCandidatePayload(f: ParsedResumeData): CandidateUpdate {
     ctc_currency: clean(f.ctc_currency)?.toUpperCase() ?? null,
     preferred_locations: list(f.preferred_locations ?? []),
     open_to_relocate: typeof f.open_to_relocate === 'boolean' ? f.open_to_relocate : null,
+    consent_given_at: f.consent_given_at || null,
+    source: (f.source || 'upload').trim() || 'upload',
     raw_parsed_data: f.raw_parsed_data,
   }
 }

@@ -64,6 +64,9 @@ npm run dev
 | `STORAGE_BACKEND` | `local` (default), `s3`, or `r2` | `local` |
 | `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PREFIX` | Cloudflare R2 / S3 credentials when `STORAGE_BACKEND` is `s3` or `r2` | — |
 | `ORPHAN_MAX_AGE_HOURS` / `ORPHAN_CLEANUP_INTERVAL_MINUTES` / `ENABLE_CLEANUP_SCHEDULER` | Scheduled cleanup of unattached `pending` resume files | `24` / `60` / `true` |
+| `RETENTION_DAYS` | Candidate data retention window in days (`0` disables automatic purge) | `365` |
+| `ENABLE_OCR_FALLBACK` / `OCR_MIN_TEXT_LENGTH` | Automatic OCR fallback (Tesseract / Gemini multimodal) for scanned PDFs | `true` / `40` |
+| `BULK_UPLOAD_MAX_FILES` / `REDIS_URL` | Bulk upload batch limit and optional Redis/ARQ worker queue (falls back to FastAPI `BackgroundTasks`) | `25` / — |
 | `DUPLICATE_NAME_SIMILARITY_THRESHOLD` | `pg_trgm` fuzzy name duplicate threshold (`0.0`–`1.0`) | `0.6` |
 | `CORS_ORIGINS` | Allowed frontend origins (JSON array or comma-separated) | `["http://localhost:5173"]` |
 

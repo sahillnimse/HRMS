@@ -5,29 +5,35 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  FileSpreadsheet,
   FileText,
   GitCompareArrows,
   LayoutGrid,
   List,
   Search,
   Sparkles,
+  Trash2,
   Upload,
   Users,
   X,
 } from 'lucide-react'
 import { useCandidates } from '@/hooks/useCandidates'
+import { useResumes } from '@/hooks/useResumes'
 import { useAuth } from '@/contexts/AuthContext'
-import { api, fetchResumeBlob } from '@/lib/api'
+import { useBlindMode } from '@/contexts/BlindModeContext'
+import { useAddToast } from '@/components/ui/Toast'
+import { api, downloadBlobFile, fetchResumeBlob } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { CandidateCard } from '@/components/CandidateCard'
 import { CandidateTable } from '@/components/CandidateTable'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { cn, formatRelativeDate } from '@/lib/utils'
-import type { PendingResumeItem, ResumeUploadResponse } from '@/types'
+import type { CandidateSearchItem, PendingResumeItem, ResumeUploadResponse } from '@/types'
 
 const PENDING_CACHE_KEY = 'hrms_pending_uploads'
 
@@ -43,6 +49,8 @@ function getCachedUploads(): Record<string, ResumeUploadResponse> {
 export default function CandidatesPage() {
   const navigate = useNavigate()
   const { canWrite } = useAuth()
+  const { blindMode } = useBlindMode()
+  const addToast = useAddToast()
   const {
     candidates,
     stats,
@@ -53,7 +61,9 @@ export default function CandidatesPage() {
     fetchCandidates,
     searchCandidates,
     fetchStats,
+    deleteCandidate,
   } = useCandidates()
+  const { deletePendingResume } = useResumes()
 
   const [view, setView] = useState<'grid' | 'table'>('grid')
   const [page, setPage] = useState(1)
@@ -63,6 +73,10 @@ export default function CandidatesPage() {
   const [pendingResumes, setPendingResumes] = useState<PendingResumeItem[]>([])
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [compareIds, setCompareIds] = useState<string[]>([])
+  const [deleteCandTarget, setDeleteCandTarget] = useState<CandidateSearchItem | null>(null)
+  const [deletePendingTarget, setDeletePendingTarget] = useState<PendingResumeItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [exportingXlsx, setExportingXlsx] = useState(false)
 
   const cachedUploads = useMemo(() => getCachedUploads(), [])
 
@@ -131,6 +145,65 @@ export default function CandidatesPage() {
     }
   }
 
+  const handleConfirmDeleteCandidate = async () => {
+    if (!deleteCandTarget) return
+    setDeleting(true)
+    const ok = await deleteCandidate(deleteCandTarget.id)
+    setDeleting(false)
+    if (ok) {
+      addToast('Candidate and resume file deleted', 'success')
+      setCompareIds((prev) => prev.filter((id) => id !== deleteCandTarget.id))
+      setDeleteCandTarget(null)
+      loadCandidates()
+      void fetchStats()
+    } else {
+      addToast('Failed to delete candidate', 'error')
+    }
+  }
+
+  const handleConfirmDeletePending = async () => {
+    if (!deletePendingTarget) return
+    setDeleting(true)
+    const ok = await deletePendingResume(deletePendingTarget.id)
+    setDeleting(false)
+    if (ok) {
+      setPendingResumes((prev) => prev.filter((p) => p.id !== deletePendingTarget.id))
+      try {
+        const raw = window.sessionStorage.getItem(PENDING_CACHE_KEY)
+        if (raw) {
+          const map = JSON.parse(raw) as Record<string, ResumeUploadResponse>
+          delete map[deletePendingTarget.id]
+          window.sessionStorage.setItem(PENDING_CACHE_KEY, JSON.stringify(map))
+        }
+      } catch {
+        // Ignore storage errors
+      }
+      addToast('Pending CV discarded', 'info')
+      setDeletePendingTarget(null)
+    } else {
+      addToast('Failed to delete pending CV', 'error')
+    }
+  }
+
+  const handleExportXlsx = async () => {
+    try {
+      setExportingXlsx(true)
+      await downloadBlobFile(
+        '/candidates/export/xlsx',
+        {
+          blind: blindMode,
+          ids: compareIds.length > 0 ? compareIds.join(',') : undefined,
+        },
+        blindMode ? 'candidates-blind-shortlist.xlsx' : 'candidates-shortlist.xlsx',
+      )
+      addToast('Shortlist XLSX exported', 'success')
+    } catch {
+      addToast('Failed to export XLSX shortlist', 'error')
+    } finally {
+      setExportingXlsx(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -138,14 +211,20 @@ export default function CandidatesPage() {
         title="Candidates"
         description="Browse every candidate whose profile and CV have been uploaded. Click any candidate to open their full profile dashboard, network graph, and saved resume."
         actions={
-          canWrite ? (
-            <Button asChild size="lg" className="shadow-glow">
-              <Link to="/upload">
-                <Upload size={17} />
-                Upload Resume
-              </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" loading={exportingXlsx} onClick={() => void handleExportXlsx()}>
+              <FileSpreadsheet size={15} />
+              {compareIds.length > 0 ? `Export Selected (${compareIds.length})` : 'Export XLSX'}
             </Button>
-          ) : undefined
+            {canWrite && (
+              <Button asChild size="lg" className="shadow-glow">
+                <Link to="/upload">
+                  <Upload size={17} />
+                  Upload Resume
+                </Link>
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -205,6 +284,17 @@ export default function CandidatesPage() {
                         onClick={() => navigate('/review', { state: { upload: cached } })}
                       >
                         Resume Review & Save
+                      </Button>
+                    )}
+                    {canWrite && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeletePendingTarget(item)}
+                        className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <Trash2 size={13} />
+                        Delete
                       </Button>
                     )}
                   </div>
@@ -399,6 +489,7 @@ export default function CandidatesPage() {
               selected={compareIds.includes(c.id)}
               selectDisabled={compareIds.length >= 3}
               onToggleSelect={toggleCompare}
+              onDelete={canWrite ? setDeleteCandTarget : undefined}
             />
           ))}
         </div>
@@ -410,8 +501,29 @@ export default function CandidatesPage() {
           selectedIds={compareIds}
           maxSelect={3}
           onToggleSelect={toggleCompare}
+          onDelete={canWrite ? setDeleteCandTarget : undefined}
         />
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteCandTarget)}
+        title={`Delete ${deleteCandTarget?.full_name || 'candidate'}?`}
+        description="This permanently deletes the candidate record, all parsed data, and their stored resume file while retaining a PII-free audit entry."
+        confirmLabel="Delete Candidate"
+        loading={deleting}
+        onConfirm={handleConfirmDeleteCandidate}
+        onCancel={() => setDeleteCandTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deletePendingTarget)}
+        title={`Discard "${deletePendingTarget?.original_filename || 'CV'}"?`}
+        description="This permanently deletes the unsaved resume file from storage."
+        confirmLabel="Delete CV"
+        loading={deleting}
+        onConfirm={handleConfirmDeletePending}
+        onCancel={() => setDeletePendingTarget(null)}
+      />
 
       {!loading && pagination.pages > 1 && (
         <div className="flex items-center justify-between rounded-2xl border bg-white px-5 py-3 shadow-card">

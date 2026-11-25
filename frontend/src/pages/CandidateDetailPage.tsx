@@ -15,8 +15,9 @@ import {
 import { useCandidates } from '@/hooks/useCandidates'
 import { useJobs } from '@/hooks/useJobs'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBlindMode } from '@/contexts/BlindModeContext'
 import { useAddToast } from '@/components/ui/Toast'
-import { api, fetchResumeBlob, getErrorMessage } from '@/lib/api'
+import { api, downloadBlobFile, fetchResumeBlob, getErrorMessage } from '@/lib/api'
 import { getSourceFilename, getStoredFilename } from '@/lib/profile'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Tabs } from '@/components/ui/Tabs'
@@ -37,6 +38,7 @@ export default function CandidateDetailPage() {
   const navigate = useNavigate()
   const addToast = useAddToast()
   const { canWrite } = useAuth()
+  const { blindMode } = useBlindMode()
   const { selected, loading, error, getCandidate, updateCandidate, deleteCandidate } =
     useCandidates()
   const { jobs, fetchJobs, addApplication } = useJobs()
@@ -46,6 +48,7 @@ export default function CandidateDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [openingCv, setOpeningCv] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   const [showAddToJob, setShowAddToJob] = useState(false)
   const [candidateApps, setCandidateApps] = useState<ApplicationItem[]>([])
@@ -54,9 +57,15 @@ export default function CandidateDetailPage() {
 
   useEffect(() => {
     if (id) {
-      void getCandidate(id)
+      void getCandidate(id, { blind: blindMode })
     }
-  }, [id, getCandidate])
+  }, [id, blindMode, getCandidate])
+
+  useEffect(() => {
+    if (blindMode && tab === 'resume') {
+      setTab('overview')
+    }
+  }, [blindMode, tab])
 
   useEffect(() => {
     if (showAddToJob && id) {
@@ -127,7 +136,9 @@ export default function CandidateDetailPage() {
     if (!id || !selected) return
     try {
       setExporting(true)
-      const res = await api.get<CandidateResponse>(`/candidates/${id}/export`)
+      const res = await api.get<CandidateResponse>(`/candidates/${id}/export`, {
+        params: blindMode ? { blind: true } : undefined,
+      })
       const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -141,6 +152,24 @@ export default function CandidateDetailPage() {
       addToast(getErrorMessage(err, 'Failed to export JSON'), 'error')
     } finally {
       setExporting(false)
+    }
+  }
+
+  const exportPdf = async () => {
+    if (!id || !selected) return
+    try {
+      setExportingPdf(true)
+      await downloadBlobFile(
+        `/candidates/${id}/export/pdf`,
+        { blind: blindMode },
+        `${selected.full_name.toLowerCase().replace(/\s+/g, '-')}-brief.pdf`,
+      )
+      setActivityRefresh((n) => n + 1)
+      addToast(blindMode ? 'Blind PDF brief exported' : 'One-page PDF exported', 'success')
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Failed to export PDF'), 'error')
+    } finally {
+      setExportingPdf(false)
     }
   }
 
@@ -194,15 +223,19 @@ export default function CandidateDetailPage() {
                 Add to Job
               </Button>
             )}
-            {selected.resume_file_id && (
+            {!blindMode && selected.resume_file_id && (
               <Button variant="outline" size="sm" onClick={handleOpenCv} loading={openingCv}>
                 <FileText size={15} />
                 View Saved CV
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={exportPdf} loading={exportingPdf}>
+              <Download size={15} />
+              {blindMode ? 'Blind PDF' : 'Export PDF'}
+            </Button>
             <Button variant="outline" size="sm" onClick={exportJson} loading={exporting}>
               <Download size={15} />
-              Export JSON
+              JSON
             </Button>
             {canWrite && tab !== 'edit' && (
               <Button variant="soft" size="sm" onClick={() => setTab('edit')}>
@@ -232,10 +265,12 @@ export default function CandidateDetailPage() {
           { value: 'overview', label: 'Profile Overview', icon: LayoutDashboard },
           { value: 'network', label: 'Network Graph', icon: Network },
           { value: 'activity', label: 'Notes & Activity', icon: MessageSquare },
-          ...(selected.resume_file_id
+          ...(!blindMode && selected.resume_file_id
             ? [{ value: 'resume' as const, label: 'Saved Resume / CV', icon: FileText }]
             : []),
-          ...(canWrite ? [{ value: 'edit' as const, label: 'Edit Details', icon: Edit3 }] : []),
+          ...(canWrite && !blindMode
+            ? [{ value: 'edit' as const, label: 'Edit Details', icon: Edit3 }]
+            : []),
         ]}
       />
 

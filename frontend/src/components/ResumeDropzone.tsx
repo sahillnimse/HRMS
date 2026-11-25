@@ -5,11 +5,20 @@ import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 
 interface ResumeDropzoneProps {
-  onFileAccept: (file: File) => void
+  onFileAccept?: (file: File) => void
+  onFilesAccept?: (files: File[]) => void
+  multiple?: boolean
+  maxFiles?: number
   accepting: boolean
 }
 
-export function ResumeDropzone({ onFileAccept, accepting }: ResumeDropzoneProps) {
+export function ResumeDropzone({
+  onFileAccept,
+  onFilesAccept,
+  multiple = false,
+  maxFiles = 25,
+  accepting,
+}: ResumeDropzoneProps) {
   const [rejectMsg, setRejectMsg] = useState<string | null>(null)
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
@@ -18,18 +27,26 @@ export function ResumeDropzone({ onFileAccept, accepting }: ResumeDropzoneProps)
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
     },
     maxSize: 10 * 1024 * 1024,
-    maxFiles: 1,
+    multiple,
+    maxFiles: multiple ? maxFiles : 1,
     disabled: accepting,
     onDropAccepted: (files) => {
       setRejectMsg(null)
-      if (files[0]) onFileAccept(files[0])
+      if (files.length === 0) return
+      if (onFilesAccept) {
+        onFilesAccept(files)
+      } else if (onFileAccept && files[0]) {
+        onFileAccept(files[0])
+      }
     },
     onDropRejected: (rejections) => {
       const code = rejections[0]?.errors[0]?.code
       if (code === 'file-too-large') {
-        setRejectMsg('File exceeds the 10 MB limit. Please upload a smaller PDF or DOCX.')
+        setRejectMsg('One or more files exceed the 10 MB limit.')
+      } else if (code === 'too-many-files') {
+        setRejectMsg(`You can upload up to ${maxFiles} resumes per batch.`)
       } else {
-        setRejectMsg('Unsupported file format. Please upload a PDF (.pdf) or Word (.docx) resume.')
+        setRejectMsg('Unsupported file format. Please upload PDF (.pdf) or Word (.docx) resumes.')
       }
     },
   })
@@ -62,29 +79,33 @@ export function ResumeDropzone({ onFileAccept, accepting }: ResumeDropzoneProps)
 
         <h3 className="mt-5 text-base font-semibold text-slate-900">
           {isDragActive
-            ? 'Release to analyze this resume'
-            : 'Drop candidate resume or CV here'}
+            ? multiple
+              ? 'Release to queue these resumes'
+              : 'Release to analyze this resume'
+            : multiple
+              ? 'Drop one or multiple resumes here'
+              : 'Drop candidate resume or CV here'}
         </h3>
         <p className="mx-auto mt-1.5 max-w-sm text-sm text-slate-500">
-          Automatically extracts contact details, career timeline, skills, and builds an interactive
-          network graph.
+          Automatically extracts contact details, career timeline, skills, and falls back to OCR
+          for scanned PDFs.
         </p>
 
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <Button type="button" variant="outline" size="sm" className="bg-white">
             <FileText size={15} />
-            Browse files
+            {multiple ? 'Browse files (single or bulk)' : 'Browse files'}
           </Button>
         </div>
 
-        <div className="mt-5 flex items-center justify-center gap-2 text-xs text-slate-400">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
           <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-600">
-            PDF
+            PDF (incl. scanned OCR)
           </span>
           <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-600">
             DOCX
           </span>
-          <span>· Up to 10 MB</span>
+          <span>· Up to 10 MB each{multiple ? ` · Max ${maxFiles} files` : ''}</span>
         </div>
       </div>
 

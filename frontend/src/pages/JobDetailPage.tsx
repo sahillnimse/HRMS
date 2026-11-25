@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   Building2,
   Check,
+  EyeOff,
+  FileSpreadsheet,
   GitCompareArrows,
   Kanban,
   MapPin,
@@ -16,6 +18,8 @@ import {
 import { useJobs } from '@/hooks/useJobs'
 import { useCandidates } from '@/hooks/useCandidates'
 import { useAuth } from '@/contexts/AuthContext'
+import { blindCandidateLabel, useBlindMode } from '@/contexts/BlindModeContext'
+import { downloadBlobFile } from '@/lib/api'
 import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { KanbanBoard } from '@/components/KanbanBoard'
@@ -33,6 +37,7 @@ export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { canWrite } = useAuth()
+  const { blindMode } = useBlindMode()
   const addToast = useAddToast()
   const {
     jobDetail,
@@ -61,6 +66,24 @@ export default function JobDetailPage() {
   const [addingId, setAddingId] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [exportingXlsx, setExportingXlsx] = useState(false)
+
+  const handleExportXlsx = async () => {
+    if (!id || !jobDetail) return
+    try {
+      setExportingXlsx(true)
+      await downloadBlobFile(
+        `/jobs/${id}/export/xlsx`,
+        { blind: blindMode },
+        `${jobDetail.title.toLowerCase().replace(/\s+/g, '-')}-shortlist.xlsx`,
+      )
+      addToast('Job shortlist XLSX exported', 'success')
+    } catch {
+      addToast('Failed to export job shortlist', 'error')
+    } finally {
+      setExportingXlsx(false)
+    }
+  }
 
   useEffect(() => {
     if (id) {
@@ -258,40 +281,46 @@ export default function JobDetailPage() {
           jobDetail.description || 'Drag candidates across stages to track hiring progress.'
         }
         actions={
-          canWrite ? (
-            <>
-              <Select
-                value={jobDetail.status}
-                onChange={(e) => void handleStatusChange(e.target.value as JobStatus)}
-                className="h-9 w-28 text-xs font-semibold capitalize"
-              >
-                <option value="open">Open</option>
-                <option value="draft">Draft</option>
-                <option value="closed">Closed</option>
-              </Select>
-              <Button variant="outline" size="sm" loading={scoring} onClick={() => void handleRunMatch()}>
-                <Sparkles size={15} className="text-brand-600" />
-                {matches.length > 0 ? 'Re-score Matches' : 'Run Match Scoring'}
-              </Button>
-              <Button size="sm" onClick={() => setShowAddModal(true)} className="shadow-glow">
-                <UserPlus size={15} />
-                Add Candidate
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConfirmDelete(true)}
-                className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-              >
-                <Trash2 size={15} />
-                Delete
-              </Button>
-            </>
-          ) : (
-            <Badge variant="brand" className="capitalize">
-              {jobDetail.status}
-            </Badge>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" loading={exportingXlsx} onClick={() => void handleExportXlsx()}>
+              <FileSpreadsheet size={15} />
+              Export XLSX
+            </Button>
+            {canWrite ? (
+              <>
+                <Select
+                  value={jobDetail.status}
+                  onChange={(e) => void handleStatusChange(e.target.value as JobStatus)}
+                  className="h-9 w-28 text-xs font-semibold capitalize"
+                >
+                  <option value="open">Open</option>
+                  <option value="draft">Draft</option>
+                  <option value="closed">Closed</option>
+                </Select>
+                <Button variant="outline" size="sm" loading={scoring} onClick={() => void handleRunMatch()}>
+                  <Sparkles size={15} className="text-brand-600" />
+                  {matches.length > 0 ? 'Re-score Matches' : 'Run Match Scoring'}
+                </Button>
+                <Button size="sm" onClick={() => setShowAddModal(true)} className="shadow-glow">
+                  <UserPlus size={15} />
+                  Add Candidate
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirmDelete(true)}
+                  className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                >
+                  <Trash2 size={15} />
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <Badge variant="brand" className="capitalize">
+                {jobDetail.status}
+              </Badge>
+            )}
+          </div>
         }
       />
 
@@ -505,7 +534,14 @@ export default function JobDetailPage() {
                           #{idx + 1}
                         </span>
 
-                        {cand && <Avatar name={cand.full_name} size="md" />}
+                        {cand &&
+                          (blindMode ? (
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                              <EyeOff size={18} />
+                            </div>
+                          ) : (
+                            <Avatar name={cand.full_name} size="md" />
+                          ))}
 
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <div className="flex flex-wrap items-center gap-2">
@@ -513,7 +549,9 @@ export default function JobDetailPage() {
                               to={`/candidates/${m.candidate_id}`}
                               className="truncate text-sm font-semibold text-slate-900 hover:text-brand-600"
                             >
-                              {cand?.full_name ?? 'Candidate'}
+                              {blindMode
+                                ? blindCandidateLabel(m.candidate_id)
+                                : cand?.full_name ?? 'Candidate'}
                             </Link>
                             {cand?.primary_domain && (
                               <Badge variant="brand">{cand.primary_domain}</Badge>

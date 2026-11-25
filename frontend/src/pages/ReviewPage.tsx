@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowUpRight,
   CheckCircle2,
   Edit3,
@@ -9,6 +10,8 @@ import {
   Network,
   RefreshCw,
   Save,
+  ScanText,
+  SkipForward,
   Upload,
   UserPlus,
 } from 'lucide-react'
@@ -64,8 +67,25 @@ export default function ReviewPage() {
   const addToast = useAddToast()
   const { createCandidate, updateCandidate, loading: saving, error: saveError } = useCandidates()
 
-  const upload =
-    (location.state as { upload?: ResumeUploadResponse } | null)?.upload ?? loadFallbackUpload()
+  const state = location.state as {
+    upload?: ResumeUploadResponse
+    queue?: ResumeUploadResponse[]
+  } | null
+
+  const initialQueue: ResumeUploadResponse[] =
+    state?.queue && state.queue.length > 0
+      ? state.queue
+      : state?.upload
+        ? [state.upload]
+        : (() => {
+            const fb = loadFallbackUpload()
+            return fb ? [fb] : []
+          })()
+
+  const [queue] = useState<ResumeUploadResponse[]>(initialQueue)
+  const [queueIdx, setQueueIdx] = useState(0)
+  const [savedCount, setSavedCount] = useState(0)
+  const upload = queue[queueIdx]
 
   const [draft, setDraft] = useState<ParsedResumeData | null>(() =>
     upload ? normalizeProfile(upload.parsed_data) : null,
@@ -75,15 +95,34 @@ export default function ReviewPage() {
   const [savedMode, setSavedMode] = useState<'created' | 'updated'>('created')
 
   useEffect(() => {
-    if (!upload) {
+    if (queue.length === 0) {
       navigate('/upload', { replace: true })
     }
-  }, [upload, navigate])
+  }, [queue.length, navigate])
+
+  useEffect(() => {
+    if (upload) {
+      setDraft(normalizeProfile(upload.parsed_data))
+      setTab('dossier')
+    }
+  }, [upload])
 
   if (!upload || !draft) return null
 
+  const isMultiQueue = queue.length > 1
+  const hasMoreInQueue = queueIdx < queue.length - 1
   const duplicateMatches = upload.duplicate.matches ?? []
   const hasDuplicates = upload.duplicate.is_duplicate && duplicateMatches.length > 0
+
+  const advanceOrFinish = (result: CandidateResponse, mode: 'created' | 'updated') => {
+    setSavedCount((c) => c + 1)
+    if (hasMoreInQueue) {
+      setQueueIdx((i) => i + 1)
+    } else {
+      setSavedMode(mode)
+      setSavedCandidate(result)
+    }
+  }
 
   const commitCreate = async (payload: CandidateUpdate, allowDuplicate: boolean) => {
     const result = await createCandidate({
@@ -94,9 +133,8 @@ export default function ReviewPage() {
     })
     if (result) {
       clearCachedUpload(upload.resume_file_id)
-      setSavedMode('created')
-      setSavedCandidate(result)
       addToast(`${result.full_name} saved to candidate directory`, 'success')
+      advanceOrFinish(result, 'created')
     } else {
       addToast('Failed to save candidate. Check duplicate or required fields.', 'error')
     }
@@ -127,11 +165,18 @@ export default function ReviewPage() {
     const result = await updateCandidate(existingId, payload)
     if (result) {
       clearCachedUpload(upload.resume_file_id)
-      setSavedMode('updated')
-      setSavedCandidate(result)
       addToast(`Updated existing profile for ${result.full_name}`, 'success')
+      advanceOrFinish(result, 'updated')
     } else {
       addToast('Failed to update existing candidate.', 'error')
+    }
+  }
+
+  const handleSkipCurrent = () => {
+    if (hasMoreInQueue) {
+      setQueueIdx((i) => i + 1)
+    } else {
+      navigate('/candidates')
     }
   }
 
@@ -143,9 +188,11 @@ export default function ReviewPage() {
             <CheckCircle2 size={32} />
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-            {savedMode === 'updated'
-              ? 'Existing Candidate Updated'
-              : 'Candidate Saved Successfully'}
+            {isMultiQueue
+              ? `Batch Review Complete (${savedCount} Saved)`
+              : savedMode === 'updated'
+                ? 'Existing Candidate Updated'
+                : 'Candidate Saved Successfully'}
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
             <span className="font-semibold text-slate-800">{savedCandidate.full_name}</span>{' '}
@@ -158,12 +205,12 @@ export default function ReviewPage() {
               View Full Profile
               <ArrowUpRight size={16} />
             </Button>
-            <Button variant="outline" size="lg" onClick={() => navigate('/')}>
-              Go to Dashboard
+            <Button variant="outline" size="lg" onClick={() => navigate('/candidates')}>
+              Go to Candidates
             </Button>
             <Button variant="soft" size="lg" onClick={() => navigate('/upload')}>
               <Upload size={16} />
-              Upload Another
+              Upload More
             </Button>
           </div>
         </div>
@@ -176,19 +223,60 @@ export default function ReviewPage() {
       <PageHeader
         onBack={() => navigate('/upload')}
         backLabel="Back to Upload"
-        eyebrow="Step 3 · Human-in-the-Loop Verification"
+        eyebrow={
+          isMultiQueue
+            ? `Bulk Review Queue · Candidate ${queueIdx + 1} of ${queue.length}`
+            : 'Step 3 · Human-in-the-Loop Verification'
+        }
         title={draft.full_name || 'Review Parsed Candidate'}
         description="Inspect the auto-generated network graph and full dossier below. Edit any detail before saving to PostgreSQL."
         actions={
-          <div className="flex flex-wrap items-center gap-3">
-            <Stepper current={2} />
+          <div className="flex flex-wrap items-center gap-2.5">
+            {upload.ocr_used && (
+              <Badge variant="brand">
+                <ScanText size={12} />
+                Extracted via OCR
+              </Badge>
+            )}
+            {!isMultiQueue && <Stepper current={2} />}
+            {isMultiQueue && (
+              <Button variant="outline" size="sm" onClick={handleSkipCurrent} disabled={saving}>
+                <SkipForward size={14} />
+                {hasMoreInQueue ? 'Skip' : 'Finish'}
+              </Button>
+            )}
             <Button onClick={handleSaveAsNew} loading={saving} className="shadow-glow">
               {hasDuplicates ? <UserPlus size={16} /> : <Save size={16} />}
-              {hasDuplicates ? 'Save as New' : 'Save Candidate'}
+              {hasMoreInQueue
+                ? hasDuplicates
+                  ? 'Save New & Next'
+                  : 'Save & Next'
+                : hasDuplicates
+                  ? 'Save as New'
+                  : 'Save Candidate'}
+              {hasMoreInQueue && <ArrowRight size={15} />}
             </Button>
           </div>
         }
       />
+
+      {isMultiQueue && (
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/50 px-5 py-3">
+          <div className="flex items-center justify-between text-xs font-medium text-brand-900">
+            <span>
+              Reviewing <span className="font-bold">{queueIdx + 1}</span> of{' '}
+              <span className="font-bold">{queue.length}</span> parsed resumes
+            </span>
+            <span>{savedCount} saved so far</span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-brand-100">
+            <div
+              className="h-full rounded-full bg-brand-600 transition-all"
+              style={{ width: `${Math.round(((queueIdx + 1) / queue.length) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Multi-Match Duplicate Resolution Panel */}
       {hasDuplicates && (

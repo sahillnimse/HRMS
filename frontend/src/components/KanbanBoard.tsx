@@ -12,8 +12,9 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, Clock, GripVertical, Trash2 } from 'lucide-react'
+import { ArrowUpRight, Clock, EyeOff, GripVertical, Trash2 } from 'lucide-react'
 import type { ApplicationItem, ApplicationStage } from '@/types'
+import { blindCandidateLabel, useBlindMode } from '@/contexts/BlindModeContext'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
@@ -94,8 +95,9 @@ function CardBody({
   onRemove?: () => void
   dragHandleProps?: Record<string, unknown>
 }) {
+  const { blindMode } = useBlindMode()
   const cand = app.candidate
-  const name = cand?.full_name || 'Candidate'
+  const name = blindMode ? blindCandidateLabel(app.candidate_id) : cand?.full_name || 'Candidate'
 
   return (
     <div className="rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-brand-200 hover:shadow-md">
@@ -111,7 +113,13 @@ function CardBody({
               <GripVertical size={14} />
             </button>
           )}
-          <Avatar name={name} size="sm" />
+          {blindMode ? (
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+              <EyeOff size={14} />
+            </div>
+          ) : (
+            <Avatar name={name} size="sm" />
+          )}
           <div className="min-w-0">
             <Link
               to={`/candidates/${app.candidate_id}`}

@@ -104,6 +104,29 @@ export async function fetchResumeBlob(resumeFileId: string, download = false): P
   return response.data
 }
 
+/** Download an authenticated binary file (PDF / XLSX) as a browser attachment. */
+export async function downloadBlobFile(
+  path: string,
+  params: Record<string, unknown> | undefined,
+  fallbackFilename: string,
+): Promise<void> {
+  const response = await api.get<Blob>(path, {
+    params,
+    responseType: 'blob',
+  })
+  const disp = String(response.headers?.['content-disposition'] || '')
+  const match = disp.match(/filename="?([^"]+)"?/i)
+  const filename = match?.[1] || fallbackFilename
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
 interface ValidationIssue {
   loc?: unknown[]
   msg?: string

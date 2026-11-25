@@ -17,7 +17,7 @@ from app.core.rate_limit import login_rate_limiter  # noqa: E402
 from app.crud.user import create_user  # noqa: E402
 from app.db.session import _normalize_asyncpg_url  # noqa: E402
 from app.main import create_app  # noqa: E402
-from app.models.candidate import Candidate, ResumeFile  # noqa: E402
+from app.models.candidate import Candidate, ParseJob, ResumeFile  # noqa: E402
 from app.models.matching import SkillNormalization  # noqa: E402
 from app.models.pipeline import AuditLog, Job  # noqa: E402
 from app.models.user import User, UserRole  # noqa: E402
@@ -105,6 +105,7 @@ async def cleanup_records(db_session_factory):
     tracker: dict[str, list] = {
         "candidates": [],
         "resume_files": [],
+        "parse_jobs": [],
         "users": [],
         "jobs": [],
         "skill_normalizations": [],
@@ -120,6 +121,8 @@ async def cleanup_records(db_session_factory):
             ]
             if entity_ids:
                 await db.execute(delete(AuditLog).where(AuditLog.entity_id.in_(entity_ids)))
+            if tracker["parse_jobs"]:
+                await db.execute(delete(ParseJob).where(ParseJob.id.in_(tracker["parse_jobs"])))
             if tracker["jobs"]:
                 await db.execute(delete(Job).where(Job.id.in_(tracker["jobs"])))
             if tracker["candidates"]:

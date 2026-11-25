@@ -704,6 +704,51 @@ export function EditableReview({
                 tone={{ bg: '#f0f9ff', text: '#075985' }}
               />
             </div>
+
+            <div className="grid grid-cols-1 gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="source">Candidate Source</Label>
+                <Select
+                  id="source"
+                  value={form.source ?? 'upload'}
+                  onChange={(e) => handleField('source', e.target.value)}
+                >
+                  <option value="upload">Direct Upload</option>
+                  <option value="referral">Employee Referral</option>
+                  <option value="careers">Careers Portal</option>
+                  <option value="linkedin">LinkedIn / Sourcing</option>
+                  <option value="agency">Recruiting Agency</option>
+                  <option value="other">Other</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="consent_given_at">Data Consent Recorded</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="consent_given_at"
+                    type="date"
+                    value={form.consent_given_at ? form.consent_given_at.slice(0, 10) : ''}
+                    onChange={(e) =>
+                      handleField(
+                        'consent_given_at',
+                        e.target.value ? new Date(`${e.target.value}T00:00:00Z`).toISOString() : null,
+                      )
+                    }
+                  />
+                  {!form.consent_given_at && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleField('consent_given_at', new Date().toISOString())}
+                      className="shrink-0"
+                    >
+                      Today
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
 

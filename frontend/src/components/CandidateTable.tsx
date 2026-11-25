@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Check, FileText } from 'lucide-react'
+import { ArrowUpRight, Check, EyeOff, FileText, Trash2 } from 'lucide-react'
 import type { CandidateSearchItem } from '@/types'
+import { blindCandidateLabel, useBlindMode } from '@/contexts/BlindModeContext'
 import { cn, formatRelativeDate, formatYears } from '@/lib/utils'
 import { getSeniority } from '@/lib/profile'
 import { Avatar } from '@/components/ui/Avatar'
@@ -11,6 +12,7 @@ interface CandidateTableProps {
   selectedIds?: string[]
   maxSelect?: number
   onToggleSelect?: (id: string) => void
+  onDelete?: (candidate: CandidateSearchItem) => void
 }
 
 export function CandidateTable({
@@ -18,7 +20,9 @@ export function CandidateTable({
   selectedIds = [],
   maxSelect = 3,
   onToggleSelect,
+  onDelete,
 }: CandidateTableProps) {
+  const { blindMode } = useBlindMode()
   const selectable = Boolean(onToggleSelect)
 
   return (
@@ -87,13 +91,19 @@ export function CandidateTable({
                   )}
                   <td className="px-5 py-4">
                     <Link to={`/candidates/${c.id}`} className="flex items-center gap-3">
-                      <Avatar name={c.full_name} size="sm" />
+                      {blindMode ? (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                          <EyeOff size={14} />
+                        </div>
+                      ) : (
+                        <Avatar name={c.full_name} size="sm" />
+                      )}
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-900 group-hover:text-brand-600">
-                          {c.full_name}
+                          {blindMode ? blindCandidateLabel(c.id) : c.full_name}
                         </p>
                         <p className="truncate text-xs text-slate-500">
-                          {roleLine || c.email || '—'}
+                          {roleLine || (blindMode ? 'Identity hidden' : c.email || '—')}
                         </p>
                       </div>
                     </Link>
@@ -136,13 +146,26 @@ export function CandidateTable({
                     )}
                   </td>
                   <td className="px-5 py-4 text-right">
-                    <Link
-                      to={`/candidates/${c.id}`}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
-                    >
-                      Open
-                      <ArrowUpRight size={13} />
-                    </Link>
+                    <div className="inline-flex items-center gap-1.5">
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => onDelete(c)}
+                          title="Delete candidate"
+                          aria-label={`Delete ${blindMode ? blindCandidateLabel(c.id) : c.full_name}`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                      <Link
+                        to={`/candidates/${c.id}`}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+                      >
+                        Open
+                        <ArrowUpRight size={13} />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               )

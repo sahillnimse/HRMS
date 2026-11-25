@@ -1,8 +1,9 @@
+from datetime import datetime
 from decimal import Decimal
 import enum
 from uuid import UUID as PyUUID
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,6 +13,13 @@ from app.db.base import Base
 class ResumeFileStatus(str, enum.Enum):
     pending = "pending"
     attached = "attached"
+
+
+class ParseJobStatus(str, enum.Enum):
+    queued = "queued"
+    processing = "processing"
+    done = "done"
+    failed = "failed"
 
 
 class ResumeFile(Base):
@@ -127,6 +135,16 @@ class Candidate(Base):
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
     embedding_json: Mapped[list[float] | None] = mapped_column(JSONB, nullable=True)
 
+    # --- Privacy, Consent & Provenance (Phase 3) ---
+    consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(80),
+        nullable=False,
+        default="upload",
+        server_default="upload",
+        index=True,
+    )
+
     # --- Duplicate flagging ---
     is_duplicate_flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -154,3 +172,36 @@ class Candidate(Base):
         back_populates="candidate",
         cascade="all, delete-orphan",
     )
+
+
+class ParseJob(Base):
+    """Background bulk-upload resume parsing job (Phase 3)."""
+
+    __tablename__ = "parse_jobs"
+
+    batch_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    resume_file_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("resume_files.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=ParseJobStatus.queued.value,
+        server_default=ParseJobStatus.queued.value,
+        index=True,
+    )
+    result_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    duplicate_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_by: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

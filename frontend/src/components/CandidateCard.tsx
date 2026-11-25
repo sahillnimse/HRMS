@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Briefcase, Check, FileText, Mail, MapPin, Sparkles } from 'lucide-react'
+import { ArrowUpRight, Briefcase, Check, EyeOff, FileText, Mail, MapPin, Sparkles, Trash2 } from 'lucide-react'
 import type { CandidateSearchItem } from '@/types'
+import { blindCandidateLabel, useBlindMode } from '@/contexts/BlindModeContext'
 import { cn, formatRelativeDate, formatYears } from '@/lib/utils'
 import { getSeniority } from '@/lib/profile'
 import { Avatar } from '@/components/ui/Avatar'
@@ -12,6 +13,7 @@ interface CandidateCardProps {
   selected?: boolean
   selectDisabled?: boolean
   onToggleSelect?: (id: string) => void
+  onDelete?: (candidate: CandidateSearchItem) => void
 }
 
 export function CandidateCard({
@@ -20,7 +22,10 @@ export function CandidateCard({
   selected = false,
   selectDisabled = false,
   onToggleSelect,
+  onDelete,
 }: CandidateCardProps) {
+  const { blindMode } = useBlindMode()
+  const displayName = blindMode ? blindCandidateLabel(candidate.id) : candidate.full_name
   const roleLine = [candidate.current_title, candidate.current_company].filter(Boolean).join(' · ')
   const relevance =
     typeof candidate.relevance_score === 'number' && candidate.relevance_score > 0
@@ -31,27 +36,33 @@ export function CandidateCard({
     <Link to={`/candidates/${candidate.id}`} className="group block h-full">
       <article
         className={cn(
-          'flex h-full flex-col justify-between rounded-2xl border bg-white p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg',
+          'flex h-full flex-col justify-between rounded-2xl border bg-white p-5 shadow-card card-interactive animate-fade-up',
           selected
             ? 'border-brand-500 ring-2 ring-brand-500/20'
-            : 'border-slate-200/80 hover:border-brand-200',
+            : 'border-stone-200/80',
         )}
       >
         <div>
           {/* Top row */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <Avatar name={candidate.full_name} size="md" />
+              {blindMode ? (
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                  <EyeOff size={18} />
+                </div>
+              ) : (
+                <Avatar name={candidate.full_name} size="md" />
+              )}
               <div className="min-w-0">
                 <h3 className="truncate text-[15px] font-semibold text-slate-900 transition group-hover:text-brand-600">
-                  {candidate.full_name}
+                  {displayName}
                 </h3>
                 <p className="truncate text-xs text-slate-500">
-                  {roleLine || candidate.email || 'No email provided'}
+                  {roleLine || (blindMode ? 'Identity hidden' : candidate.email || 'No email provided')}
                 </p>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1">
               {selectable && onToggleSelect && (
                 <button
                   type="button"
@@ -81,6 +92,21 @@ export function CandidateCard({
                   <Check size={14} className={selected ? 'opacity-100' : 'opacity-40'} />
                 </button>
               )}
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onDelete(candidate)
+                  }}
+                  title="Delete candidate"
+                  aria-label={`Delete ${displayName}`}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 transition hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-300 transition group-hover:bg-brand-50 group-hover:text-brand-600">
                 <ArrowUpRight size={16} />
               </span>
@@ -103,7 +129,7 @@ export function CandidateCard({
           </div>
 
           {/* Contact / Location metadata */}
-          {(candidate.city || (roleLine && candidate.email)) && (
+          {(candidate.city || (!blindMode && roleLine && candidate.email)) && (
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
               {candidate.city && (
                 <span className="inline-flex items-center gap-1">
@@ -111,7 +137,7 @@ export function CandidateCard({
                   {candidate.city}
                 </span>
               )}
-              {roleLine && candidate.email && (
+              {!blindMode && roleLine && candidate.email && (
                 <span className="inline-flex min-w-0 items-center gap-1 truncate">
                   <Mail size={12} className="shrink-0 text-slate-400" />
                   <span className="truncate">{candidate.email}</span>

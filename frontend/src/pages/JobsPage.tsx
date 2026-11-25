@@ -7,6 +7,7 @@ import {
   MapPin,
   Plus,
   Search,
+  Trash2,
   Users,
   X,
 } from 'lucide-react'
@@ -14,6 +15,7 @@ import { useJobs } from '@/hooks/useJobs'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
@@ -22,7 +24,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Badge } from '@/components/ui/Badge'
 import { TagInput } from '@/components/ui/TagInput'
 import { cn, formatRelativeDate } from '@/lib/utils'
-import type { JobPayload, JobStatus } from '@/types'
+import type { JobItem, JobPayload, JobStatus } from '@/types'
 
 const STATUS_BADGE: Record<JobStatus, 'success' | 'warning' | 'secondary'> = {
   open: 'success',
@@ -46,13 +48,32 @@ export default function JobsPage() {
   const navigate = useNavigate()
   const { canWrite } = useAuth()
   const addToast = useAddToast()
-  const { jobs, loading, error, fetchJobs, createJob } = useJobs()
+  const { jobs, loading, error, fetchJobs, createJob, deleteJob } = useJobs()
 
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState<JobPayload>(EMPTY_JOB)
   const [creating, setCreating] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<JobItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleConfirmDeleteJob = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    const ok = await deleteJob(deleteTarget.id)
+    setDeleting(false)
+    if (ok) {
+      addToast(`Deleted job "${deleteTarget.title}"`, 'success')
+      setDeleteTarget(null)
+      void fetchJobs({
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        search: search.trim() || undefined,
+      })
+    } else {
+      addToast('Failed to delete job', 'error')
+    }
+  }
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -175,7 +196,7 @@ export default function JobsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {jobs.map((job) => (
             <Link key={job.id} to={`/jobs/${job.id}`} className="group block h-full">
-              <article className="flex h-full flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-5 shadow-card transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg">
+              <article className="flex h-full flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 shadow-card card-interactive animate-fade-up">
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -193,9 +214,26 @@ export default function JobsPage() {
                         {job.title}
                       </h3>
                     </div>
-                    <span className="rounded-lg p-1 text-slate-300 group-hover:bg-brand-50 group-hover:text-brand-600">
-                      <ArrowUpRight size={16} />
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {canWrite && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setDeleteTarget(job)
+                          }}
+                          title="Delete job"
+                          aria-label={`Delete ${job.title}`}
+                          className="rounded-lg p-1.5 text-slate-300 transition hover:bg-red-50 hover:text-red-600"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                      <span className="rounded-lg p-1 text-slate-300 group-hover:bg-brand-50 group-hover:text-brand-600">
+                        <ArrowUpRight size={16} />
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -391,6 +429,15 @@ export default function JobsPage() {
           </form>
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={`Delete "${deleteTarget?.title || 'job'}"?`}
+        description="This permanently deletes the job requisition, match scores, and pipeline applications."
+        confirmLabel="Delete Job"
+        loading={deleting}
+        onConfirm={handleConfirmDeleteJob}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

@@ -61,7 +61,8 @@ from app.schemas.pipeline import (
     CandidateNoteCreate,
     CandidateNoteResponse,
 )
-from app.services.audit import record_audit, redact_ctc_for_role
+from app.services.audit import record_audit, redact_ctc_for_role, redact_for_blind_screening
+from app.services.exports import build_candidate_pdf, build_shortlist_xlsx
 from app.services.file_storage import storage
 
 router = APIRouter()
@@ -186,10 +187,73 @@ async def search_candidates_endpoint(
     )
 
 
+@router.get("/export/xlsx")
+async def export_candidates_xlsx(
+    ids: Optional[str] = Query(None, description="Optional comma-separated candidate UUIDs"),
+    blind: bool = Query(False, description="Hide name, email, phone, and college/institution"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*READ_ROLES)),
+):
+    """Export candidates shortlist as a formatted XLSX workbook (respects viewer & blind mode)."""
+    stmt = select(Candidate).order_by(Candidate.created_at.desc())
+    if ids:
+        raw_ids = [s.strip() for s in ids.split(",") if s.strip()]
+        try:
+            parsed_ids = [UUID(i) for i in raw_ids]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid candidate UUID in `ids`",
+            )
+        stmt = stmt.where(Candidate.id.in_(parsed_ids))
+    else:
+        stmt = stmt.limit(500)
+
+    cands = list((await db.execute(stmt)).scalars().all())
+    include_ctc = current_user.role in (UserRole.admin, UserRole.recruiter)
+
+    rows = []
+    for c in cands:
+        resp = redact_ctc_for_role(CandidateResponse.model_validate(c), current_user.role)
+        if blind:
+            resp = redact_for_blind_screening(resp)
+        rows.append(resp.model_dump())
+
+    xlsx_bytes = build_shortlist_xlsx(
+        rows,
+        sheet_title="Candidates Shortlist",
+        include_ctc=include_ctc,
+        include_job_columns=False,
+        blind=blind,
+    )
+
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="export",
+        entity="candidate",
+        entity_id="shortlist",
+        metadata={
+            "format": "xlsx",
+            "count": len(rows),
+            "blind": blind,
+            "role": current_user.role.value,
+        },
+    )
+
+    fname = "candidates-blind-shortlist.xlsx" if blind else "candidates-shortlist.xlsx"
+    return StreamingResponse(
+        BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.get("/compare", response_model=CandidateCompareResponse)
 async def compare_candidates_endpoint(
     ids: str = Query(..., description="Comma-separated list of 2 to 3 candidate UUIDs"),
     job_id: Optional[UUID] = Query(None, description="Optional job ID to include cached match scores"),
+    blind: bool = Query(False, description="Anonymize candidate identities for blind screening"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(*READ_ROLES)),
 ):
@@ -229,6 +293,8 @@ async def compare_candidates_endpoint(
             commit=False,
         )
         resp = redact_ctc_for_role(CandidateResponse.model_validate(cand), current_user.role)
+        if blind:
+            resp = redact_for_blind_screening(resp)
         candidates_out.append(resp)
 
         c_skills = [*(resp.technical_skills or []), *(resp.tools or [])]
@@ -259,10 +325,11 @@ async def compare_candidates_endpoint(
 @router.get("/{candidate_id}", response_model=CandidateResponse)
 async def get_candidate(
     candidate_id: UUID,
+    blind: bool = Query(False, description="Anonymize identity fields for blind screening"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(*READ_ROLES)),
 ):
-    """Get a single candidate's full profile, record a view audit log, and redact CTC for viewers."""
+    """Get a single candidate's full profile, record a view audit log, and redact CTC/blind fields."""
     candidate = await get_candidate_by_id(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
@@ -273,19 +340,22 @@ async def get_candidate(
         action="view",
         entity="candidate",
         entity_id=candidate.id,
-        metadata={"role": current_user.role.value},
+        metadata={"role": current_user.role.value, "blind": blind},
     )
-    resp = CandidateResponse.model_validate(candidate)
-    return redact_ctc_for_role(resp, current_user.role)
+    resp = redact_ctc_for_role(CandidateResponse.model_validate(candidate), current_user.role)
+    if blind:
+        resp = redact_for_blind_screening(resp)
+    return resp
 
 
 @router.get("/{candidate_id}/export", response_model=CandidateResponse)
 async def export_candidate_json(
     candidate_id: UUID,
+    blind: bool = Query(False, description="Anonymize identity fields for blind screening"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(*READ_ROLES)),
 ):
-    """Audited JSON export of a candidate profile (respects viewer CTC redaction)."""
+    """Audited JSON export of a candidate profile (respects viewer CTC & blind redaction)."""
     candidate = await get_candidate_by_id(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
@@ -296,10 +366,51 @@ async def export_candidate_json(
         action="export",
         entity="candidate",
         entity_id=candidate.id,
-        metadata={"format": "json", "role": current_user.role.value},
+        metadata={"format": "json", "blind": blind, "role": current_user.role.value},
     )
-    resp = CandidateResponse.model_validate(candidate)
-    return redact_ctc_for_role(resp, current_user.role)
+    resp = redact_ctc_for_role(CandidateResponse.model_validate(candidate), current_user.role)
+    if blind:
+        resp = redact_for_blind_screening(resp)
+    return resp
+
+
+@router.get("/{candidate_id}/export/pdf")
+async def export_candidate_pdf(
+    candidate_id: UUID,
+    blind: bool = Query(False, description="Hide name, email, phone, and college/institution"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*READ_ROLES)),
+):
+    """Audited one-page executive PDF dossier export (respects viewer CTC & blind redaction)."""
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    pdf_bytes = build_candidate_pdf(
+        CandidateResponse.model_validate(candidate),
+        role=current_user.role,
+        blind=blind,
+    )
+
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="export",
+        entity="candidate",
+        entity_id=candidate.id,
+        metadata={"format": "pdf", "blind": blind, "role": current_user.role.value},
+    )
+
+    slug = (
+        f"candidate-{str(candidate.id)[:6]}-blind"
+        if blind
+        else "-".join(candidate.full_name.lower().split())[:48] or str(candidate.id)[:8]
+    )
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.pdf"'},
+    )
 
 
 @router.get("/{candidate_id}/resume")
@@ -464,6 +575,6 @@ async def delete_candidate_endpoint(
         action="delete",
         entity="candidate",
         entity_id=candidate_id,
-        metadata={},
+        metadata={"reason": "manual_delete", "pii_wiped": True},
     )
     return None

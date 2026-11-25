@@ -1,4 +1,10 @@
-from app.models.candidate import Candidate, ResumeFile, ResumeFileStatus
+from app.models.candidate import (
+    Candidate,
+    ParseJob,
+    ParseJobStatus,
+    ResumeFile,
+    ResumeFileStatus,
+)
 from app.models.matching import JobMatch, SkillNormalization
 from app.models.pipeline import (
     Application,
@@ -21,6 +27,8 @@ __all__ = [
     "Job",
     "JobMatch",
     "JobStatus",
+    "ParseJob",
+    "ParseJobStatus",
     "RefreshToken",
     "ResumeFile",
     "ResumeFileStatus",

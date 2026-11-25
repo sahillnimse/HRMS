@@ -65,6 +65,10 @@ class CandidateCreate(BaseModel):
     preferred_locations: List[str] = Field(default_factory=list)
     open_to_relocate: Optional[bool] = None
 
+    # Privacy, consent & provenance (Phase 3)
+    consent_given_at: Optional[datetime] = None
+    source: str = Field(default="upload", max_length=80)
+
     raw_parsed_data: dict = Field(default_factory=dict)
 
     # Duplicate resolution controls
@@ -100,6 +104,8 @@ class CandidateUpdate(BaseModel):
     ctc_currency: Optional[str] = Field(None, max_length=10)
     preferred_locations: Optional[List[str]] = None
     open_to_relocate: Optional[bool] = None
+    consent_given_at: Optional[datetime] = None
+    source: Optional[str] = Field(None, max_length=80)
     raw_parsed_data: Optional[dict] = None
     is_duplicate_flagged: Optional[bool] = None
 
@@ -137,6 +143,8 @@ class CandidateResponse(BaseModel):
     ctc_currency: Optional[str] = None
     preferred_locations: List[str] = Field(default_factory=list)
     open_to_relocate: Optional[bool] = None
+    consent_given_at: Optional[datetime] = None
+    source: str = "upload"
     raw_parsed_data: dict
     resume_file_id: Optional[UUID] = None
     is_duplicate_flagged: bool
@@ -167,6 +175,8 @@ class CandidateListItem(BaseModel):
     is_duplicate_flagged: bool = False
     resume_file_id: Optional[UUID] = None
     resume_filename: Optional[str] = None
+    source: str = "upload"
+    consent_given_at: Optional[datetime] = None
     created_at: datetime
     current_title: Optional[str] = None
     current_company: Optional[str] = None
@@ -229,6 +239,7 @@ class ResumeUploadResponse(BaseModel):
     resume_file_id: UUID
     parsed_data: dict  # ParsedResume.to_flat_dict() without _resume_text
     duplicate: DuplicateInfo
+    ocr_used: bool = False
     message: str
 
     @field_validator("parsed_data", mode="before")
@@ -237,3 +248,50 @@ class ResumeUploadResponse(BaseModel):
         if not isinstance(v, dict):
             return {}
         return _strip_internal_resume_text(v)
+
+
+class ParseJobItem(BaseModel):
+    """Status and parsed payload for a single file inside a bulk upload batch."""
+
+    id: UUID
+    batch_id: UUID
+    resume_file_id: Optional[UUID] = None
+    original_filename: str
+    status: str
+    result_json: Optional[dict] = None
+    duplicate_json: Optional[dict] = None
+    error_message: Optional[str] = None
+    ocr_used: bool = False
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime] = None
+
+    @field_validator("result_json", mode="before")
+    @classmethod
+    def strip_resume_text_from_job(cls, v: Any) -> Optional[dict]:
+        if v is None:
+            return None
+        if not isinstance(v, dict):
+            return {}
+        return _strip_internal_resume_text(v)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BulkUploadResponse(BaseModel):
+    """Response from POST /api/v1/resumes/bulk-upload."""
+
+    batch_id: UUID
+    jobs: List[ParseJobItem]
+    queue_backend: str
+    message: str
+
+
+class RetentionPurgeResponse(BaseModel):
+    """Response from POST /api/v1/privacy/purge-expired."""
+
+    retention_days: int
+    dry_run: bool
+    matched_count: int
+    purged_count: int
+    candidate_ids: List[UUID] = Field(default_factory=list)

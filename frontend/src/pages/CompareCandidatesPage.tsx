@@ -7,6 +7,7 @@ import {
   Briefcase,
   Check,
   Clock,
+  EyeOff,
   GraduationCap,
   MapPin,
   Sparkles,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBlindMode } from '@/contexts/BlindModeContext'
 import { computeCompleteness, formatCtc, getSeniority } from '@/lib/profile'
 import { cn, formatYears } from '@/lib/utils'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -27,6 +29,7 @@ export default function CompareCandidatesPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { canWrite } = useAuth()
+  const { blindMode } = useBlindMode()
 
   const idsParam = searchParams.get('ids') || ''
   const jobIdParam = searchParams.get('jobId') || searchParams.get('job_id') || ''
@@ -55,6 +58,7 @@ export default function CompareCandidatesPage() {
         params: {
           ids: cleanIds.join(','),
           job_id: jobIdParam || undefined,
+          blind: blindMode || undefined,
         },
       })
       .then((res) => {
@@ -70,7 +74,7 @@ export default function CompareCandidatesPage() {
     return () => {
       cancelled = true
     }
-  }, [idsParam, jobIdParam])
+  }, [idsParam, jobIdParam, blindMode])
 
   const sharedSet = useMemo(
     () => new Set((data?.shared_skills ?? []).map((s) => s.toLowerCase())),
@@ -163,7 +167,13 @@ export default function CompareCandidatesPage() {
               <div className="border-b border-slate-100 bg-slate-50/60 p-5 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <Avatar name={c.full_name} size="md" />
+                    {blindMode ? (
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                        <EyeOff size={18} />
+                      </div>
+                    ) : (
+                      <Avatar name={c.full_name} size="md" />
+                    )}
                     <div className="min-w-0">
                       <Link
                         to={`/candidates/${c.id}`}

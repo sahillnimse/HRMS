@@ -124,3 +124,110 @@ def redact_ctc_for_role(resp: CandidateResponse, role: UserRole) -> CandidateRes
             "raw_parsed_data": _sanitize_raw_for_viewer(resp.raw_parsed_data or {}),
         }
     )
+
+
+_BLIND_IDENTITY_KEYS = frozenset(
+    {
+        "full_name",
+        "email",
+        "phone",
+        "phone_normalized",
+        "linkedin_url",
+        "github_url",
+        "portfolio_url",
+        "photo",
+        "photo_url",
+        "avatar",
+        "institution",
+        "college",
+        "university",
+    }
+)
+
+
+def blind_candidate_label(candidate_id: str | UUID) -> str:
+    """Deterministic anonymized identifier for blind screening."""
+    short = str(candidate_id).replace("-", "")[:6].upper()
+    return f"Candidate #{short}"
+
+
+def _mask_tokens_in_text(text_val: str, tokens: list[str]) -> str:
+    masked = text_val or ""
+    for tok in tokens:
+        clean = (tok or "").strip()
+        if len(clean) >= 3:
+            masked = re.sub(re.escape(clean), "[Redacted]", masked, flags=re.IGNORECASE)
+    return masked
+
+
+def _sanitize_raw_for_blind(value: Any, tokens: list[str]) -> Any:
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if k in _BLIND_IDENTITY_KEYS or k in _INTERNAL_ONLY_KEYS:
+                continue
+            out[k] = _sanitize_raw_for_blind(v, tokens)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_raw_for_blind(item, tokens) for item in value]
+    if isinstance(value, str):
+        return _mask_tokens_in_text(value, tokens)
+    return value
+
+
+def redact_for_blind_screening(resp: CandidateResponse) -> CandidateResponse:
+    """
+    Anonymize a CandidateResponse for blind screening:
+    hides full name, email, phone, social URLs, photo/avatar metadata, and college/institution names.
+    """
+    tokens: list[str] = []
+    if resp.full_name:
+        tokens.append(resp.full_name)
+        for part in resp.full_name.split():
+            if len(part) >= 3:
+                tokens.append(part)
+    if resp.email:
+        tokens.append(resp.email)
+    if resp.phone:
+        tokens.append(resp.phone)
+
+    redacted_edu = []
+    for item in resp.education or []:
+        if isinstance(item, dict):
+            inst = str(item.get("institution") or "").strip()
+            if inst:
+                tokens.append(inst)
+            copy = dict(item)
+            copy["institution"] = "[Institution Redacted]"
+            redacted_edu.append(copy)
+        else:
+            redacted_edu.append(item)
+
+    redacted_work = []
+    for item in resp.work_experience or []:
+        if isinstance(item, dict):
+            copy = dict(item)
+            if isinstance(copy.get("bullets"), list):
+                copy["bullets"] = [
+                    _mask_tokens_in_text(b, tokens) if isinstance(b, str) else b
+                    for b in copy["bullets"]
+                ]
+            redacted_work.append(copy)
+        else:
+            redacted_work.append(item)
+
+    return resp.model_copy(
+        update={
+            "full_name": blind_candidate_label(resp.id),
+            "email": None,
+            "phone": None,
+            "phone_normalized": None,
+            "linkedin_url": None,
+            "github_url": None,
+            "portfolio_url": None,
+            "profile_summary": _mask_tokens_in_text(resp.profile_summary, tokens),
+            "work_experience": redacted_work,
+            "education": redacted_edu,
+            "raw_parsed_data": _sanitize_raw_for_blind(resp.raw_parsed_data or {}, tokens),
+        }
+    )

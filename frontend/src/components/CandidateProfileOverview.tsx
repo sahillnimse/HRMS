@@ -6,6 +6,7 @@ import {
   Code2,
   Copy,
   ExternalLink,
+  EyeOff,
   FileText,
   Github,
   Globe,
@@ -23,6 +24,7 @@ import {
 import type { CandidateProfileData } from '@/types'
 import { fetchResumeBlob } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBlindMode } from '@/contexts/BlindModeContext'
 import { cn, formatDate, formatLongDate, formatYears } from '@/lib/utils'
 import {
   computeCompleteness,
@@ -54,7 +56,7 @@ function CompletenessRing({ score, missing }: { score: number; missing: string[]
   const radius = 26
   const circ = 2 * Math.PI * radius
   const offset = circ * (1 - score / 100)
-  const color = score >= 80 ? '#059669' : score >= 55 ? '#4f46e5' : '#d97706'
+  const color = score >= 80 ? '#0d8274' : score >= 55 ? '#0f9d8a' : '#f25c43'
 
   return (
     <div
@@ -108,6 +110,7 @@ export function CandidateProfileOverview({
   const [copiedEmail, setCopiedEmail] = useState(false)
   const [openingCv, setOpeningCv] = useState(false)
   const { canWrite } = useAuth()
+  const { blindMode } = useBlindMode()
 
   const currentRole = getCurrentRole(profile.work_experience)
   const seniority = getSeniority(profile.years_experience)
@@ -143,19 +146,25 @@ export function CandidateProfileOverview({
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Hero Dossier Header */}
-      <div className="overflow-hidden rounded-2xl border bg-white shadow-card">
-        <div className="relative h-20 bg-gradient-to-r from-brand-100/70 via-indigo-50 to-violet-100/70 bg-dots">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/40" />
+      <div className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-card">
+        <div className="relative h-24 mesh-hero bg-dots">
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/55" />
         </div>
 
         <div className="relative z-10 px-6 pb-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              <Avatar
-                name={profile.full_name}
-                size="xl"
-                className="-mt-12 ring-4 ring-white shadow-md"
-              />
+              {blindMode ? (
+                <div className="-mt-12 flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-4 ring-white shadow-md">
+                  <EyeOff size={28} />
+                </div>
+              ) : (
+                <Avatar
+                  name={profile.full_name}
+                  size="xl"
+                  className="-mt-12 ring-4 ring-white shadow-md"
+                />
+              )}
               <div className="space-y-1.5 pt-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-2xl font-bold tracking-tight text-slate-900">
@@ -216,6 +225,16 @@ export function CandidateProfileOverview({
                   {createdAt && (
                     <span className="text-slate-400">Added {formatLongDate(createdAt)}</span>
                   )}
+                  {profile.source && (
+                    <Badge variant="secondary" className="capitalize">
+                      Source: {profile.source}
+                    </Badge>
+                  )}
+                  {profile.consent_given_at && (
+                    <Badge variant="success">
+                      Consent: {formatDate(profile.consent_given_at)}
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
@@ -227,7 +246,8 @@ export function CandidateProfileOverview({
           </div>
 
           {/* External Links & Saved CV Bar */}
-          {(profile.linkedin_url || profile.github_url || profile.portfolio_url || resumeFileId) && (
+          {!blindMode &&
+            (profile.linkedin_url || profile.github_url || profile.portfolio_url || resumeFileId) && (
             <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
               {resumeFileId && (
                 <button

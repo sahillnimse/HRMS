@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
+  FileSpreadsheet,
   Filter,
   Layers,
   LayoutGrid,
@@ -18,16 +19,21 @@ import {
 } from 'lucide-react'
 import { useCandidates } from '@/hooks/useCandidates'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBlindMode } from '@/contexts/BlindModeContext'
+import { useAddToast } from '@/components/ui/Toast'
+import { downloadBlobFile } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { CandidateCard } from '@/components/CandidateCard'
 import { CandidateTable } from '@/components/CandidateTable'
 import { SkillFilters } from '@/components/SkillFilters'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { cn, formatYears } from '@/lib/utils'
+import type { CandidateSearchItem } from '@/types'
 
 const PRESET_DOMAINS = [
   'Software Engineering',
@@ -43,6 +49,8 @@ const PRESET_DOMAINS = [
 
 export default function DashboardPage() {
   const { canWrite } = useAuth()
+  const { blindMode } = useBlindMode()
+  const addToast = useAddToast()
   const {
     candidates,
     stats,
@@ -54,6 +62,7 @@ export default function DashboardPage() {
     fetchCandidates,
     searchCandidates,
     fetchStats,
+    deleteCandidate,
   } = useCandidates()
 
   const [view, setView] = useState<'grid' | 'table'>('grid')
@@ -65,6 +74,9 @@ export default function DashboardPage() {
   const [minYears, setMinYears] = useState('')
   const [maxYears, setMaxYears] = useState('')
   const [showSkillDrawer, setShowSkillDrawer] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<CandidateSearchItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [exportingXlsx, setExportingXlsx] = useState(false)
 
   // Debounce search text
   useEffect(() => {
@@ -142,6 +154,37 @@ export default function DashboardPage() {
   const topSkill = stats?.top_skills[0]
   const isEmptyDatabase = !loading && !statsLoading && (stats?.total ?? 0) === 0 && activeFilterCount === 0
 
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    const ok = await deleteCandidate(deleteTarget.id)
+    setDeleting(false)
+    if (ok) {
+      addToast('Candidate deleted', 'success')
+      setDeleteTarget(null)
+      loadPage()
+      void fetchStats()
+    } else {
+      addToast('Failed to delete candidate', 'error')
+    }
+  }
+
+  const handleExportXlsx = async () => {
+    try {
+      setExportingXlsx(true)
+      await downloadBlobFile(
+        '/candidates/export/xlsx',
+        { blind: blindMode },
+        blindMode ? 'candidates-blind-shortlist.xlsx' : 'candidates-shortlist.xlsx',
+      )
+      addToast('Shortlist XLSX exported', 'success')
+    } catch {
+      addToast('Failed to export XLSX', 'error')
+    } finally {
+      setExportingXlsx(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -149,14 +192,20 @@ export default function DashboardPage() {
         title="Candidate Dashboard"
         description="Search structured candidate dossiers, inspect career networks, and filter your talent pool by skills, domain, and seniority."
         actions={
-          canWrite ? (
-            <Button asChild size="lg" className="shadow-glow">
-              <Link to="/upload">
-                <Upload size={17} />
-                Upload Resume
-              </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" loading={exportingXlsx} onClick={() => void handleExportXlsx()}>
+              <FileSpreadsheet size={15} />
+              Export XLSX
             </Button>
-          ) : undefined
+            {canWrite && (
+              <Button asChild size="lg" className="shadow-glow">
+                <Link to="/upload">
+                  <Upload size={17} />
+                  Upload Resume
+                </Link>
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -172,7 +221,9 @@ export default function DashboardPage() {
                 : 'Ready to grow',
             badgeTone: stats && stats.added_this_week > 0 ? 'success' : 'secondary',
             icon: Users,
-            iconTint: 'bg-brand-50 text-brand-600',
+            iconTint: 'bg-brand-50 text-brand-600 ring-1 ring-brand-100',
+            accentBar: 'from-brand-500 to-teal-400',
+            stagger: 'stagger-1',
           },
           {
             label: 'Avg. Experience',
@@ -180,7 +231,9 @@ export default function DashboardPage() {
             badge: 'Across saved pool',
             badgeTone: 'secondary',
             icon: Briefcase,
-            iconTint: 'bg-sky-50 text-sky-600',
+            iconTint: 'bg-coral-50 text-coral-600 ring-1 ring-coral-100',
+            accentBar: 'from-coral-400 to-amber-400',
+            stagger: 'stagger-2',
           },
           {
             label: 'Active Domains',
@@ -188,7 +241,9 @@ export default function DashboardPage() {
             badge: topDomain ? `Top: ${topDomain.name}` : 'No domains yet',
             badgeTone: topDomain ? 'brand' : 'secondary',
             icon: Layers,
-            iconTint: 'bg-violet-50 text-violet-600',
+            iconTint: 'bg-amber-50 text-amber-600 ring-1 ring-amber-100',
+            accentBar: 'from-amber-400 to-orange-400',
+            stagger: 'stagger-3',
           },
           {
             label: 'Most Common Skill',
@@ -196,32 +251,43 @@ export default function DashboardPage() {
             badge: topSkill ? `${topSkill.count} candidate${topSkill.count === 1 ? '' : 's'}` : 'Upload CV to map',
             badgeTone: topSkill ? 'brand' : 'secondary',
             icon: Code2,
-            iconTint: 'bg-emerald-50 text-emerald-600',
+            iconTint: 'bg-sky-50 text-sky-600 ring-1 ring-sky-100',
+            accentBar: 'from-sky-500 to-brand-400',
+            stagger: 'stagger-4',
           },
         ].map((kpi) => {
           const Icon = kpi.icon
           return (
             <div
               key={kpi.label}
-              className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-card transition hover:border-slate-300/80"
+              className={cn(
+                'group relative overflow-hidden rounded-2xl border border-stone-200/80 bg-white p-5 shadow-card card-interactive animate-fade-up',
+                kpi.stagger,
+              )}
             >
+              <div
+                className={cn(
+                  'absolute inset-x-0 top-0 h-1 bg-gradient-to-r opacity-85 transition-opacity group-hover:opacity-100',
+                  kpi.accentBar,
+                )}
+              />
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   {kpi.label}
                 </span>
                 <span
                   className={cn(
-                    'flex h-9 w-9 items-center justify-center rounded-xl',
+                    'flex h-10 w-10 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-110',
                     kpi.iconTint,
                   )}
                 >
-                  <Icon size={17} />
+                  <Icon size={18} />
                 </span>
               </div>
               {statsLoading && !stats ? (
                 <div className="skeleton mt-3 h-8 w-24" />
               ) : (
-                <p className="mt-2.5 truncate text-2xl font-bold tracking-tight text-slate-900">
+                <p className="mt-2.5 truncate font-display text-2xl font-bold tracking-tight text-slate-900">
                   {kpi.value}
                 </p>
               )}
@@ -269,11 +335,13 @@ export default function DashboardPage() {
                         {d.count} ({pct}%)
                       </span>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
                       <div
                         className={cn(
-                          'h-full rounded-full transition-all',
-                          active ? 'bg-brand-600' : 'bg-brand-400 group-hover:bg-brand-500',
+                          'h-full rounded-full animate-bar-grow transition-all',
+                          active
+                            ? 'bg-gradient-to-r from-brand-600 to-teal-500'
+                            : 'bg-gradient-to-r from-brand-400 to-teal-400 group-hover:from-brand-500 group-hover:to-coral-400',
                         )}
                         style={{ width: `${Math.max(6, pct)}%` }}
                       />
@@ -546,13 +614,13 @@ export default function DashboardPage() {
 
             {/* Subtle light-theme mini network preview illustration */}
             <div className="lg:col-span-5">
-              <div className="rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/70 via-white to-violet-50/70 p-5 bg-dots">
+              <div className="rounded-2xl border border-brand-200/70 mesh-hero p-5 bg-dots">
                 <div className="mb-3 flex items-center justify-between text-xs font-semibold text-brand-700">
                   <span className="inline-flex items-center gap-1.5">
                     <Network size={14} />
                     Live Network Preview
                   </span>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500 shadow-sm">
+                  <span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] text-slate-500 shadow-sm">
                     Auto-generated on upload
                   </span>
                 </div>
@@ -567,18 +635,19 @@ export default function DashboardPage() {
                   <path
                     d="M 72 48 Q 182 18 292 45"
                     fill="none"
-                    stroke="#60a5fa"
-                    strokeWidth={1.5}
+                    stroke="#0f9d8a"
+                    strokeWidth={1.6}
                     strokeDasharray="4 4"
+                    className="animate-dash"
                   />
                   <g>
-                    <circle cx="180" cy="95" r="26" fill="#4f46e5" />
+                    <circle cx="180" cy="95" r="26" fill="#0d8274" />
                     <text x="180" y="99" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700">
                       CV
                     </text>
 
-                    <circle cx="72" cy="48" r="18" fill="#f0f9ff" stroke="#0284c7" strokeWidth="1.8" />
-                    <text x="72" y="52" textAnchor="middle" fill="#0c4a6e" fontSize="9" fontWeight="700">
+                    <circle cx="72" cy="48" r="18" fill="#edfaf7" stroke="#0f9d8a" strokeWidth="1.8" />
+                    <text x="72" y="52" textAnchor="middle" fill="#0b685e" fontSize="9" fontWeight="700">
                       ROLE
                     </text>
 
@@ -587,8 +656,8 @@ export default function DashboardPage() {
                       EDU
                     </text>
 
-                    <circle cx="292" cy="45" r="17" fill="#f5f3ff" stroke="#7c3aed" strokeWidth="1.8" />
-                    <text x="292" y="49" textAnchor="middle" fill="#4c1d95" fontSize="9" fontWeight="700">
+                    <circle cx="292" cy="45" r="17" fill="#fff4f2" stroke="#f25c43" strokeWidth="1.8" />
+                    <text x="292" y="49" textAnchor="middle" fill="#bc331d" fontSize="9" fontWeight="700">
                       TECH
                     </text>
 
@@ -597,8 +666,8 @@ export default function DashboardPage() {
                       TOOL
                     </text>
 
-                    <circle cx="255" cy="158" r="15" fill="#fff1f2" stroke="#e11d48" strokeWidth="1.8" />
-                    <text x="255" y="162" textAnchor="middle" fill="#881337" fontSize="9" fontWeight="700">
+                    <circle cx="255" cy="158" r="15" fill="#f0f9ff" stroke="#0284c7" strokeWidth="1.8" />
+                    <text x="255" y="162" textAnchor="middle" fill="#075985" fontSize="9" fontWeight="700">
                       CERT
                     </text>
                   </g>
@@ -629,14 +698,31 @@ export default function DashboardPage() {
       {!loading && candidates.length > 0 && view === 'grid' && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {candidates.map((c) => (
-            <CandidateCard key={c.id} candidate={c} />
+            <CandidateCard
+              key={c.id}
+              candidate={c}
+              onDelete={canWrite ? setDeleteTarget : undefined}
+            />
           ))}
         </div>
       )}
 
       {!loading && candidates.length > 0 && view === 'table' && (
-        <CandidateTable candidates={candidates} />
+        <CandidateTable
+          candidates={candidates}
+          onDelete={canWrite ? setDeleteTarget : undefined}
+        />
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={`Delete ${deleteTarget?.full_name || 'candidate'}?`}
+        description="This permanently removes the candidate profile, parsed data, and stored resume file while retaining a PII-free audit entry."
+        confirmLabel="Delete Candidate"
+        loading={deleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Pagination */}
       {!loading && pagination.pages > 1 && (

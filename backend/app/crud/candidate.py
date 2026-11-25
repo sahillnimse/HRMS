@@ -232,6 +232,8 @@ async def create_candidate(
         ctc_currency=candidate_in.ctc_currency.upper() if candidate_in.ctc_currency else None,
         preferred_locations=candidate_in.preferred_locations,
         open_to_relocate=candidate_in.open_to_relocate,
+        consent_given_at=candidate_in.consent_given_at,
+        source=(candidate_in.source or "upload").strip()[:80] or "upload",
         raw_parsed_data=candidate_in.raw_parsed_data,
         embedding_json=emb_vec,
         resume_file_id=candidate_in.resume_file_id,
@@ -683,6 +685,9 @@ async def delete_candidate(
         if other_refs == 0:
             stored_filename = obj.resume_file.stored_filename
 
+    # Explicitly wipe raw_parsed_data (including server-side _resume_text) before deleting row
+    obj.raw_parsed_data = {}
+    await db.flush()
     await db.delete(obj)
     await db.commit()
 

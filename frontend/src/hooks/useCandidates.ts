@@ -147,20 +147,25 @@ export function useCandidates() {
     [],
   )
 
-  const getCandidate = useCallback(async (id: string): Promise<CandidateResponse | null> => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await api.get<CandidateResponse>(`/candidates/${id}`)
-      setSelected(response.data)
-      return response.data
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to load candidate'))
-      return null
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const getCandidate = useCallback(
+    async (id: string, opts?: { blind?: boolean }): Promise<CandidateResponse | null> => {
+      setLoading(true)
+      setError(null)
+      try {
+        const response = await api.get<CandidateResponse>(`/candidates/${id}`, {
+          params: opts?.blind ? { blind: true } : undefined,
+        })
+        setSelected(response.data)
+        return response.data
+      } catch (err) {
+        setError(getErrorMessage(err, 'Failed to load candidate'))
+        return null
+      } finally {
+        setLoading(false)
+      }
+    },
+    [],
+  )
 
   const deleteCandidate = useCallback(async (id: string): Promise<boolean> => {
     setLoading(true)

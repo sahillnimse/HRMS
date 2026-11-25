@@ -56,6 +56,8 @@ export interface CandidateProfileData {
   ctc_currency?: string | null
   preferred_locations?: string[]
   open_to_relocate?: boolean | null
+  consent_given_at?: string | null
+  source?: string
 }
 
 export interface ParsedResumeData extends CandidateProfileData {
@@ -83,7 +85,46 @@ export interface ResumeUploadResponse {
   resume_file_id: string
   parsed_data: ParsedResumeData
   duplicate: DuplicateInfo
+  ocr_used?: boolean
   message: string
+}
+
+export interface ParseJobItem {
+  id: string
+  batch_id: string
+  resume_file_id: string | null
+  original_filename: string
+  status: 'queued' | 'processing' | 'done' | 'failed' | string
+  result_json: ParsedResumeData | null
+  duplicate_json: DuplicateInfo | null
+  error_message: string | null
+  ocr_used: boolean
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface BulkUploadResponse {
+  batch_id: string
+  jobs: ParseJobItem[]
+  queue_backend: string
+  message: string
+}
+
+export interface PrivacySettings {
+  retention_days: number
+  orphan_max_age_hours: number
+  ocr_fallback_enabled: boolean
+  semantic_search_enabled: boolean
+  expired_candidates_count: number
+}
+
+export interface RetentionPurgeResponse {
+  retention_days: number
+  dry_run: boolean
+  matched_count: number
+  purged_count: number
+  candidate_ids: string[]
 }
 
 export interface CandidateListItem {
@@ -98,6 +139,8 @@ export interface CandidateListItem {
   is_duplicate_flagged?: boolean
   resume_file_id?: string | null
   resume_filename?: string | null
+  source?: string
+  consent_given_at?: string | null
   created_at: string
   current_title?: string | null
   current_company?: string | null
@@ -178,6 +221,8 @@ export interface CandidateUpdate {
   ctc_currency?: string | null
   preferred_locations?: string[]
   open_to_relocate?: boolean | null
+  consent_given_at?: string | null
+  source?: string
   raw_parsed_data?: Record<string, unknown>
   allow_duplicate?: boolean
   is_duplicate_flagged?: boolean
