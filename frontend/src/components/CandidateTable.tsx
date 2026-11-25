@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight, FileText } from 'lucide-react'
 import type { CandidateListItem } from '@/types'
 import { formatRelativeDate, formatYears } from '@/lib/utils'
 import { getSeniority } from '@/lib/profile'
@@ -82,7 +82,15 @@ export function CandidateTable({ candidates }: CandidateTableProps) {
                     </div>
                   </td>
                   <td className="whitespace-nowrap px-5 py-4 text-xs text-slate-500">
-                    {formatRelativeDate(c.created_at)}
+                    <div>{formatRelativeDate(c.created_at)}</div>
+                    {c.resume_file_id && (
+                      <div className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                        <FileText size={10} />
+                        <span className="max-w-[120px] truncate">
+                          {c.resume_filename || 'CV saved'}
+                        </span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <Link

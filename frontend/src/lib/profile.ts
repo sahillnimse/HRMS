@@ -120,6 +120,14 @@ export function normalizeProfile(src: ProfileSource): ParsedResumeData {
     hobbies_interests: toStringList(src.hobbies_interests),
     languages: toStringList(src.languages),
     certifications: toStringList(src.certifications),
+    notice_period_days:
+      typeof src.notice_period_days === 'number' ? src.notice_period_days : null,
+    current_ctc: typeof src.current_ctc === 'number' ? src.current_ctc : null,
+    expected_ctc: typeof src.expected_ctc === 'number' ? src.expected_ctc : null,
+    ctc_currency: src.ctc_currency ?? null,
+    preferred_locations: toStringList(src.preferred_locations),
+    open_to_relocate:
+      typeof src.open_to_relocate === 'boolean' ? src.open_to_relocate : null,
     raw_parsed_data: src.raw_parsed_data ?? {},
   }
 }
@@ -178,7 +186,36 @@ export function toCandidatePayload(f: ParsedResumeData): CandidateUpdate {
     hobbies_interests: list(f.hobbies_interests),
     languages: list(f.languages),
     certifications: list(f.certifications),
+    notice_period_days:
+      typeof f.notice_period_days === 'number' && !Number.isNaN(f.notice_period_days)
+        ? Math.max(0, Math.round(f.notice_period_days))
+        : null,
+    current_ctc:
+      typeof f.current_ctc === 'number' && !Number.isNaN(f.current_ctc)
+        ? Math.max(0, f.current_ctc)
+        : null,
+    expected_ctc:
+      typeof f.expected_ctc === 'number' && !Number.isNaN(f.expected_ctc)
+        ? Math.max(0, f.expected_ctc)
+        : null,
+    ctc_currency: clean(f.ctc_currency)?.toUpperCase() ?? null,
+    preferred_locations: list(f.preferred_locations ?? []),
+    open_to_relocate: typeof f.open_to_relocate === 'boolean' ? f.open_to_relocate : null,
     raw_parsed_data: f.raw_parsed_data,
+  }
+}
+
+export function formatCtc(amount: number | null | undefined, currency?: string | null): string {
+  if (amount == null || Number.isNaN(amount)) return '—'
+  const code = (currency || 'INR').toUpperCase()
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  } catch {
+    return `${code} ${amount.toLocaleString()}`
   }
 }
 

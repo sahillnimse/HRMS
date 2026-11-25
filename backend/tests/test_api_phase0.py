@@ -350,3 +350,124 @@ async def test_orphan_pending_resume_cleanup(db_session_factory, cleanup_records
     finally:
         for m in (meta_old_pending, meta_fresh_pending, meta_old_attached):
             await storage.delete_file(m["stored_filename"])
+
+
+async def test_delete_candidate_removes_physical_resume_file(
+    client, seeded_users, db_session_factory, cleanup_records
+):
+    rec_headers = {
+        "Authorization": "Bearer "
+        + await _login(client, seeded_users["recruiter"]["email"], seeded_users["recruiter"]["password"])
+    }
+    meta = await storage.save_file(b"%PDF-1.4 delete-me", "delete-me.pdf", "application/pdf")
+    stored_name = meta["stored_filename"]
+
+    try:
+        async with db_session_factory() as db:
+            rf = ResumeFile(
+                original_filename="delete-me.pdf",
+                stored_filename=stored_name,
+                file_path=meta["file_path"],
+                file_size=meta["file_size"],
+                content_type="application/pdf",
+                status=ResumeFileStatus.pending.value,
+            )
+            db.add(rf)
+            await db.commit()
+            await db.refresh(rf)
+            rf_id = rf.id
+            cleanup_records["resume_files"].append(rf_id)
+
+        tag = uuid.uuid4().hex[:6]
+        created = await client.post(
+            "/api/v1/candidates/",
+            headers=rec_headers,
+            json={
+                "resume_file_id": str(rf_id),
+                "full_name": f"Delete Target {tag}",
+                "email": f"del-{tag}@example.com",
+                "profile_summary": "Candidate to verify physical file deletion.",
+                "years_experience": 1.0,
+                "primary_domain": "Engineering",
+            },
+        )
+        assert created.status_code == 201, created.text
+        cand_id = uuid.UUID(created.json()["id"])
+        cleanup_records["candidates"].append(cand_id)
+
+        # File exists before deletion
+        assert await storage.read_file(stored_name) == b"%PDF-1.4 delete-me"
+
+        # Delete candidate -> DB rows AND physical storage file must be removed
+        del_resp = await client.delete(f"/api/v1/candidates/{cand_id}", headers=rec_headers)
+        assert del_resp.status_code == 204
+
+        assert await storage.delete_file(stored_name) is False
+        async with db_session_factory() as db:
+            assert (await db.execute(select(ResumeFile).where(ResumeFile.id == rf_id))).scalar_one_or_none() is None
+    finally:
+        await storage.delete_file(stored_name)
+
+
+async def test_refresh_cookie_rotation_reuse_detection_and_logout(client, seeded_users):
+    # Login issues access token + httpOnly refresh cookie
+    login_resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": seeded_users["recruiter"]["email"], "password": seeded_users["recruiter"]["password"]},
+    )
+    assert login_resp.status_code == 200
+    set_cookie = login_resp.headers.get("set-cookie", "")
+    assert "hrms_refresh_token=" in set_cookie
+    assert "httponly" in set_cookie.lower()
+    first_cookie = login_resp.cookies.get("hrms_refresh_token")
+    assert first_cookie
+
+    # Refresh rotates cookie and returns a new access token
+    ref1 = await client.post("/api/v1/auth/refresh", cookies={"hrms_refresh_token": first_cookie})
+    assert ref1.status_code == 200, ref1.text
+    second_cookie = ref1.cookies.get("hrms_refresh_token")
+    assert second_cookie and second_cookie != first_cookie
+
+    # Replaying the already-rotated (revoked) first cookie triggers reuse detection
+    # and revokes ALL sessions for that user (including second_cookie)
+    replay = await client.post("/api/v1/auth/refresh", cookies={"hrms_refresh_token": first_cookie})
+    assert replay.status_code == 401
+
+    after_replay = await client.post(
+        "/api/v1/auth/refresh", cookies={"hrms_refresh_token": second_cookie}
+    )
+    assert after_replay.status_code == 401
+
+    # Fresh login + logout revokes the refresh cookie cleanly
+    login2 = await client.post(
+        "/api/v1/auth/login",
+        json={"email": seeded_users["recruiter"]["email"], "password": seeded_users["recruiter"]["password"]},
+    )
+    assert login2.status_code == 200
+    cookie2 = login2.cookies.get("hrms_refresh_token")
+    assert cookie2
+
+    out = await client.post("/api/v1/auth/logout", cookies={"hrms_refresh_token": cookie2})
+    assert out.status_code == 204
+
+    post_logout = await client.post("/api/v1/auth/refresh", cookies={"hrms_refresh_token": cookie2})
+    assert post_logout.status_code == 401
+
+
+async def test_login_rate_limiting_and_lockout(client, seeded_users):
+    email = seeded_users["viewer"]["email"]
+    good_pw = seeded_users["viewer"]["password"]
+
+    # Default LOGIN_MAX_ATTEMPTS = 5: first 4 fail with 401, 5th triggers 429 lockout
+    for i in range(4):
+        r = await client.post("/api/v1/auth/login", json={"email": email, "password": "wrong-pw"})
+        assert r.status_code == 401, f"attempt {i + 1} expected 401, got {r.status_code}"
+
+    fifth = await client.post("/api/v1/auth/login", json={"email": email, "password": "wrong-pw"})
+    assert fifth.status_code == 429
+    assert int(fifth.headers.get("retry-after", "0")) > 0
+
+    # Even with the correct password, login stays locked out (429)
+    blocked = await client.post("/api/v1/auth/login", json={"email": email, "password": good_pw})
+    assert blocked.status_code == 429
+

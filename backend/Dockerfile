@@ -17,11 +17,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Create upload directory
+# Create local upload directory (fallback when STORAGE_BACKEND=local)
 RUN mkdir -p /app/uploads
 
 # Expose FastAPI port
 EXPOSE 8000
 
-# Run with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Apply Alembic migrations before starting the server
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

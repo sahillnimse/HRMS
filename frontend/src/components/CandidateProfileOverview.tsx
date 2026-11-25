@@ -6,6 +6,7 @@ import {
   Code2,
   Copy,
   ExternalLink,
+  FileText,
   Github,
   Globe,
   GraduationCap,
@@ -20,10 +21,13 @@ import {
   Wrench,
 } from 'lucide-react'
 import type { CandidateProfileData } from '@/types'
+import { fetchResumeBlob } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 import { cn, formatDate, formatLongDate, formatYears } from '@/lib/utils'
 import {
   computeCompleteness,
   ensureProtocol,
+  formatCtc,
   getCurrentRole,
   getSeniority,
   getSourceFilename,
@@ -102,6 +106,8 @@ export function CandidateProfileOverview({
   headerActions,
 }: CandidateProfileOverviewProps) {
   const [copiedEmail, setCopiedEmail] = useState(false)
+  const [openingCv, setOpeningCv] = useState(false)
+  const { canWrite } = useAuth()
 
   const currentRole = getCurrentRole(profile.work_experience)
   const seniority = getSeniority(profile.years_experience)
@@ -109,6 +115,19 @@ export function CandidateProfileOverview({
   const allCapabilities = [...profile.technical_skills, ...profile.tools]
   const storedFilename = getStoredFilename(rawParsedData)
   const sourceFilename = getSourceFilename(rawParsedData)
+
+  const openSavedResume = async () => {
+    if (!resumeFileId) return
+    try {
+      setOpeningCv(true)
+      const blob = await fetchResumeBlob(resumeFileId, false)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } finally {
+      setOpeningCv(false)
+    }
+  }
 
   const copyEmail = async () => {
     if (!profile.email) return
@@ -207,9 +226,21 @@ export function CandidateProfileOverview({
             </div>
           </div>
 
-          {/* External Links Bar */}
-          {(profile.linkedin_url || profile.github_url || profile.portfolio_url) && (
+          {/* External Links & Saved CV Bar */}
+          {(profile.linkedin_url || profile.github_url || profile.portfolio_url || resumeFileId) && (
             <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+              {resumeFileId && (
+                <button
+                  type="button"
+                  onClick={openSavedResume}
+                  disabled={openingCv}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60"
+                >
+                  <FileText size={13} />
+                  {openingCv ? 'Opening CV…' : sourceFilename || 'Saved Resume / CV'}
+                  <ExternalLink size={11} className="opacity-70" />
+                </button>
+              )}
               {profile.linkedin_url && (
                 <a
                   href={ensureProtocol(profile.linkedin_url)}
@@ -578,6 +609,74 @@ export function CandidateProfileOverview({
                       {profile.hobbies_interests.map((item, i) => (
                         <Badge key={i} variant="outline">
                           {item}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Compensation & Mobility */}
+          {(profile.notice_period_days != null ||
+            (profile.preferred_locations && profile.preferred_locations.length > 0) ||
+            profile.open_to_relocate != null ||
+            (canWrite && (profile.current_ctc != null || profile.expected_ctc != null))) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Briefcase size={16} className="text-emerald-600" />
+                    <CardTitle>Compensation & Mobility</CardTitle>
+                  </div>
+                  {canWrite && (profile.current_ctc != null || profile.expected_ctc != null) && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      Recruiter/Admin
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2.5 text-sm">
+                {profile.notice_period_days != null && (
+                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-2">
+                    <span className="text-slate-500">Notice Period</span>
+                    <span className="font-semibold text-slate-900">
+                      {profile.notice_period_days} day{profile.notice_period_days === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                )}
+                {canWrite && profile.current_ctc != null && (
+                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-2">
+                    <span className="text-slate-500">Current CTC</span>
+                    <span className="font-semibold text-slate-900">
+                      {formatCtc(profile.current_ctc, profile.ctc_currency)}
+                    </span>
+                  </div>
+                )}
+                {canWrite && profile.expected_ctc != null && (
+                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-2">
+                    <span className="text-slate-500">Expected CTC</span>
+                    <span className="font-semibold text-emerald-700">
+                      {formatCtc(profile.expected_ctc, profile.ctc_currency)}
+                    </span>
+                  </div>
+                )}
+                {profile.open_to_relocate != null && (
+                  <div className="flex justify-between gap-2 border-b border-slate-100 pb-2">
+                    <span className="text-slate-500">Open to Relocate</span>
+                    <Badge variant={profile.open_to_relocate ? 'success' : 'secondary'}>
+                      {profile.open_to_relocate ? 'Yes' : 'No'}
+                    </Badge>
+                  </div>
+                )}
+                {profile.preferred_locations && profile.preferred_locations.length > 0 && (
+                  <div className="pt-1">
+                    <p className="mb-1.5 text-xs font-medium text-slate-500">Preferred Locations</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {profile.preferred_locations.map((loc, i) => (
+                        <Badge key={i} variant="outline">
+                          {loc}
                         </Badge>
                       ))}
                     </div>

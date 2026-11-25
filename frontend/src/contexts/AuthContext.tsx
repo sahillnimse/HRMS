@@ -2,56 +2,60 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   api,
   getErrorMessage,
-  getStoredToken,
-  setStoredToken,
+  setAccessToken,
   UNAUTHORIZED_EVENT,
 } from '@/lib/api'
 import type { TokenResponse, User } from '@/types'
 
 interface AuthContextValue {
   user: User | null
-  token: string | null
   loading: boolean
   canWrite: boolean
   isAdmin: boolean
   login: (email: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => getStoredToken())
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState<boolean>(() => Boolean(getStoredToken()))
+  const [loading, setLoading] = useState<boolean>(true)
 
-  const logout = useCallback(() => {
-    setStoredToken(null)
-    setToken(null)
+  const clearClientSession = useCallback(() => {
+    setAccessToken(null)
     setUser(null)
   }, [])
 
-  useEffect(() => {
-    const onUnauthorized = () => logout()
-    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [logout])
+  const logout = useCallback(async () => {
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      // Clear local session even if server logout call fails
+    } finally {
+      clearClientSession()
+    }
+  }, [clearClientSession])
 
   useEffect(() => {
-    if (!token) {
-      setUser(null)
-      setLoading(false)
-      return
-    }
+    const onUnauthorized = () => clearClientSession()
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [clearClientSession])
+
+  // Restore session silently on mount using the httpOnly refresh cookie
+  useEffect(() => {
     let cancelled = false
     setLoading(true)
     api
-      .get<User>('/auth/me')
+      .post<TokenResponse>('/auth/refresh')
       .then((res) => {
-        if (!cancelled) setUser(res.data)
+        if (cancelled) return
+        setAccessToken(res.data.access_token)
+        setUser(res.data.user)
       })
       .catch(() => {
-        if (!cancelled) logout()
+        if (!cancelled) clearClientSession()
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -59,13 +63,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [token, logout])
+  }, [clearClientSession])
 
   const login = useCallback(async (email: string, password: string) => {
     try {
       const res = await api.post<TokenResponse>('/auth/login', { email, password })
-      setStoredToken(res.data.access_token)
-      setToken(res.data.access_token)
+      setAccessToken(res.data.access_token)
       setUser(res.data.user)
     } catch (err) {
       throw new Error(getErrorMessage(err, 'Invalid email or password'))
@@ -75,14 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
-      token,
       loading,
       canWrite: user?.role === 'admin' || user?.role === 'recruiter',
       isAdmin: user?.role === 'admin',
       login,
       logout,
     }),
-    [user, token, loading, login, logout],
+    [user, loading, login, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

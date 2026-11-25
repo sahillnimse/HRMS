@@ -13,13 +13,22 @@ os.environ.setdefault("ENABLE_CLEANUP_SCHEDULER", "false")
 
 from app.api.deps import get_db  # noqa: E402
 from app.core.config import settings  # noqa: E402
+from app.core.rate_limit import login_rate_limiter  # noqa: E402
 from app.crud.user import create_user  # noqa: E402
 from app.db.session import _normalize_asyncpg_url  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models.candidate import Candidate, ResumeFile  # noqa: E402
+from app.models.pipeline import AuditLog, Job  # noqa: E402
 from app.models.user import User, UserRole  # noqa: E402
 
 settings.ENABLE_CLEANUP_SCHEDULER = False
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def reset_login_limiter():
+    login_rate_limiter.reset()
+    yield
+    login_rate_limiter.reset()
 
 
 @pytest_asyncio.fixture
@@ -92,11 +101,20 @@ async def seeded_users(db_session_factory):
 @pytest_asyncio.fixture
 async def cleanup_records(db_session_factory):
     """Track IDs created during a test and purge them afterwards."""
-    tracker: dict[str, list] = {"candidates": [], "resume_files": [], "users": []}
+    tracker: dict[str, list] = {"candidates": [], "resume_files": [], "users": [], "jobs": []}
     try:
         yield tracker
     finally:
         async with db_session_factory() as db:
+            entity_ids = [
+                str(eid)
+                for key in ("candidates", "resume_files", "jobs")
+                for eid in tracker[key]
+            ]
+            if entity_ids:
+                await db.execute(delete(AuditLog).where(AuditLog.entity_id.in_(entity_ids)))
+            if tracker["jobs"]:
+                await db.execute(delete(Job).where(Job.id.in_(tracker["jobs"])))
             if tracker["candidates"]:
                 await db.execute(delete(Candidate).where(Candidate.id.in_(tracker["candidates"])))
             if tracker["resume_files"]:

@@ -13,6 +13,10 @@ import {
   X,
 } from 'lucide-react'
 import { useResumes } from '@/hooks/useResumes'
+import { useCandidates } from '@/hooks/useCandidates'
+import { useAddToast } from '@/components/ui/Toast'
+import { normalizeProfile, toCandidatePayload, validateProfile } from '@/lib/profile'
+import type { ResumeUploadResponse } from '@/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Stepper } from '@/components/ui/Stepper'
 import { ResumeDropzone } from '@/components/ResumeDropzone'
@@ -27,11 +31,30 @@ const PARSE_STAGES = [
   'Checking database for duplicate candidates',
 ]
 
+const PENDING_CACHE_KEY = 'hrms_pending_uploads'
+
+function cachePendingUpload(upload: ResumeUploadResponse) {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_CACHE_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, ResumeUploadResponse>) : {}
+    map[upload.resume_file_id] = upload
+    window.sessionStorage.setItem(PENDING_CACHE_KEY, JSON.stringify(map))
+    window.sessionStorage.setItem('hrms_last_upload_id', upload.resume_file_id)
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export default function UploadPage() {
   const navigate = useNavigate()
+  const addToast = useAddToast()
   const { uploading, uploadError, uploadResume } = useResumes()
+  const { createCandidate, loading: autoSaving } = useCandidates()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [autoSave, setAutoSave] = useState(false)
   const [stageIdx, setStageIdx] = useState(0)
+
+  const busy = uploading || autoSaving
 
   useEffect(() => {
     if (!uploading) {
@@ -47,9 +70,26 @@ export default function UploadPage() {
   const handleUpload = async () => {
     if (!selectedFile) return
     const result = await uploadResume(selectedFile)
-    if (result) {
-      navigate('/review', { state: { upload: result } })
+    if (!result) return
+
+    cachePendingUpload(result)
+
+    if (autoSave && !result.duplicate.is_duplicate) {
+      const normalized = normalizeProfile(result.parsed_data)
+      if (Object.keys(validateProfile(normalized)).length === 0) {
+        const saved = await createCandidate({
+          resume_file_id: result.resume_file_id,
+          ...toCandidatePayload(normalized),
+        })
+        if (saved) {
+          addToast(`${saved.full_name} parsed and saved with CV attached`, 'success')
+          navigate(`/candidates/${saved.id}`)
+          return
+        }
+      }
     }
+
+    navigate('/review', { state: { upload: result } })
   }
 
   return (
@@ -155,20 +195,37 @@ export default function UploadPage() {
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
-                <Button variant="outline" onClick={() => navigate('/')} disabled={uploading}>
-                  Cancel
-                </Button>
-                <Button
-                  size="lg"
-                  onClick={handleUpload}
-                  disabled={!selectedFile || uploading}
-                  loading={uploading}
-                  className="shadow-glow"
-                >
-                  {uploading ? 'Analyzing Resume…' : 'Parse & Generate Network Graph'}
-                  {!uploading && <ArrowRight size={17} />}
-                </Button>
+              <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={autoSave}
+                    onChange={(e) => setAutoSave(e.target.checked)}
+                    disabled={busy}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  Auto-save candidate to directory if no duplicate is found
+                </label>
+
+                <div className="flex items-center justify-end gap-3">
+                  <Button variant="outline" onClick={() => navigate('/candidates')} disabled={busy}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={handleUpload}
+                    disabled={!selectedFile || busy}
+                    loading={busy}
+                    className="shadow-glow"
+                  >
+                    {autoSaving
+                      ? 'Saving Profile…'
+                      : uploading
+                        ? 'Analyzing Resume…'
+                        : 'Parse & Generate Network Graph'}
+                    {!busy && <ArrowRight size={17} />}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

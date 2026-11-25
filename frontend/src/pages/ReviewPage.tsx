@@ -32,13 +32,40 @@ import type {
 
 type ReviewTab = 'dossier' | 'edit'
 
+const PENDING_CACHE_KEY = 'hrms_pending_uploads'
+
+function loadFallbackUpload(): ResumeUploadResponse | undefined {
+  try {
+    const lastId = window.sessionStorage.getItem('hrms_last_upload_id')
+    const raw = window.sessionStorage.getItem(PENDING_CACHE_KEY)
+    if (!raw || !lastId) return undefined
+    const map = JSON.parse(raw) as Record<string, ResumeUploadResponse>
+    return map[lastId]
+  } catch {
+    return undefined
+  }
+}
+
+function clearCachedUpload(resumeFileId: string) {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_CACHE_KEY)
+    if (!raw) return
+    const map = JSON.parse(raw) as Record<string, ResumeUploadResponse>
+    delete map[resumeFileId]
+    window.sessionStorage.setItem(PENDING_CACHE_KEY, JSON.stringify(map))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export default function ReviewPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const addToast = useAddToast()
   const { createCandidate, updateCandidate, loading: saving, error: saveError } = useCandidates()
 
-  const upload = (location.state as { upload?: ResumeUploadResponse } | null)?.upload
+  const upload =
+    (location.state as { upload?: ResumeUploadResponse } | null)?.upload ?? loadFallbackUpload()
 
   const [draft, setDraft] = useState<ParsedResumeData | null>(() =>
     upload ? normalizeProfile(upload.parsed_data) : null,
@@ -66,6 +93,7 @@ export default function ReviewPage() {
       is_duplicate_flagged: hasDuplicates,
     })
     if (result) {
+      clearCachedUpload(upload.resume_file_id)
       setSavedMode('created')
       setSavedCandidate(result)
       addToast(`${result.full_name} saved to candidate directory`, 'success')
@@ -98,6 +126,7 @@ export default function ReviewPage() {
     }
     const result = await updateCandidate(existingId, payload)
     if (result) {
+      clearCachedUpload(upload.resume_file_id)
       setSavedMode('updated')
       setSavedCandidate(result)
       addToast(`Updated existing profile for ${result.full_name}`, 'success')

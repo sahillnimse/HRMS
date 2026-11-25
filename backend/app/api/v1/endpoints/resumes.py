@@ -9,6 +9,7 @@ POST /api/v1/resumes/cleanup               - Trigger orphan pending file cleanup
 from io import BytesIO
 import os
 from pathlib import Path
+from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -21,8 +22,9 @@ from app.core.config import settings
 from app.crud.candidate import find_duplicates
 from app.models.candidate import ResumeFile, ResumeFileStatus
 from app.models.user import User, UserRole
-from app.schemas.candidate import DuplicateInfo, ResumeUploadResponse
+from app.schemas.candidate import DuplicateInfo, PendingResumeItem, ResumeUploadResponse
 from app.schemas.resume import ParsedResume
+from app.services.audit import record_audit
 from app.services.cleanup import cleanup_orphan_resumes
 from app.services.experience import compute_years_experience
 from app.services.file_storage import storage
@@ -164,14 +166,29 @@ async def upload_resume(
     )
 
 
+@router.get("/pending", response_model=List[PendingResumeItem])
+async def list_pending_resumes(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """List uploaded resume files that are saved in storage but not yet attached to a candidate."""
+    res = await db.execute(
+        select(ResumeFile)
+        .where(ResumeFile.status == ResumeFileStatus.pending.value)
+        .order_by(ResumeFile.created_at.desc())
+        .limit(50)
+    )
+    return list(res.scalars().all())
+
+
 @router.get("/{resume_file_id}/file")
 async def stream_resume_file(
     resume_file_id: UUID,
     download: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role(*READ_ROLES)),
+    current_user: User = Depends(require_role(*READ_ROLES)),
 ):
-    """Stream an uploaded resume file through the configured storage layer (authenticated)."""
+    """Stream an uploaded resume file through the configured storage layer (authenticated + audited)."""
     res = await db.execute(select(ResumeFile).where(ResumeFile.id == resume_file_id))
     rf = res.scalar_one_or_none()
     if not rf:
@@ -181,6 +198,15 @@ async def stream_resume_file(
         file_bytes = await storage.read_file(rf.stored_filename)
     except FileNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored resume file is missing")
+
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="export" if download else "view",
+        entity="resume_file",
+        entity_id=rf.id,
+        metadata={"filename": rf.original_filename, "download": download},
+    )
 
     safe_name = Path(rf.original_filename).name.replace('"', "")
     disposition = "attachment" if download else "inline"

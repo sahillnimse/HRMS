@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Briefcase, Mail, MapPin } from 'lucide-react'
+import { ArrowUpRight, Briefcase, FileText, Mail, MapPin } from 'lucide-react'
 import type { CandidateListItem } from '@/types'
 import { formatRelativeDate, formatYears } from '@/lib/utils'
 import { getSeniority } from '@/lib/profile'
@@ -83,9 +83,22 @@ export function CandidateCard({ candidate }: CandidateCardProps) {
         </div>
 
         {/* Footer */}
-        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
-          <span>Added {formatRelativeDate(candidate.created_at)}</span>
-          <span className="font-medium text-brand-600 opacity-0 transition group-hover:opacity-100">
+        <div className="mt-5 flex items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-400">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0">Added {formatRelativeDate(candidate.created_at)}</span>
+            {candidate.resume_file_id && (
+              <span
+                className="inline-flex min-w-0 items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700"
+                title={candidate.resume_filename || 'Saved CV attached'}
+              >
+                <FileText size={11} className="shrink-0" />
+                <span className="truncate max-w-[110px]">
+                  {candidate.resume_filename || 'CV saved'}
+                </span>
+              </span>
+            )}
+          </div>
+          <span className="shrink-0 font-medium text-brand-600 opacity-0 transition group-hover:opacity-100">
             View profile →
           </span>
         </div>

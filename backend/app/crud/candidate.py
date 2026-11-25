@@ -12,10 +12,12 @@ from uuid import UUID
 
 from sqlalchemy import and_, func, literal, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.candidate import Candidate, ResumeFile, ResumeFileStatus
 from app.schemas.candidate import CandidateCreate, CandidateUpdate, DuplicateMatch
+from app.services.file_storage import BaseStorage, storage as default_storage
 from app.services.normalization import normalize_email, normalize_phone
 
 
@@ -180,6 +182,12 @@ async def create_candidate(
         hobbies_interests=candidate_in.hobbies_interests,
         languages=candidate_in.languages,
         certifications=candidate_in.certifications,
+        notice_period_days=candidate_in.notice_period_days,
+        current_ctc=candidate_in.current_ctc,
+        expected_ctc=candidate_in.expected_ctc,
+        ctc_currency=candidate_in.ctc_currency.upper() if candidate_in.ctc_currency else None,
+        preferred_locations=candidate_in.preferred_locations,
+        open_to_relocate=candidate_in.open_to_relocate,
         raw_parsed_data=candidate_in.raw_parsed_data,
         resume_file_id=candidate_in.resume_file_id,
         is_duplicate_flagged=flagged,
@@ -207,6 +215,8 @@ async def update_candidate(
         raw_phone = update_data["phone"]
         update_data["phone"] = raw_phone.strip() if raw_phone else None
         update_data["phone_normalized"] = normalize_phone(update_data["phone"])
+    if "ctc_currency" in update_data and update_data["ctc_currency"]:
+        update_data["ctc_currency"] = update_data["ctc_currency"].strip().upper()
 
     new_resume_id = update_data.get("resume_file_id")
     for field, value in update_data.items():
@@ -267,7 +277,12 @@ async def get_candidates(
     total = total_result.scalar_one()
 
     offset = (page - 1) * page_size
-    stmt = stmt.order_by(Candidate.created_at.desc()).offset(offset).limit(page_size)
+    stmt = (
+        stmt.options(selectinload(Candidate.resume_file))
+        .order_by(Candidate.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
 
     result = await db.execute(stmt)
     items = result.scalars().all()
@@ -317,11 +332,46 @@ async def get_candidate_stats(db: AsyncSession) -> dict:
     }
 
 
-async def delete_candidate(db: AsyncSession, candidate_id: str | UUID) -> bool:
-    result = await db.execute(select(Candidate).where(Candidate.id == candidate_id))
+async def delete_candidate(
+    db: AsyncSession,
+    candidate_id: str | UUID,
+    *,
+    storage_backend: Optional[BaseStorage] = None,
+) -> bool:
+    """
+    Delete a candidate, its cascaded ResumeFile row, and the physical resume file
+    from storage so no orphaned PII remains on disk or object storage.
+    """
+    result = await db.execute(
+        select(Candidate)
+        .options(selectinload(Candidate.resume_file))
+        .where(Candidate.id == candidate_id)
+    )
     obj = result.scalar_one_or_none()
     if not obj:
         return False
+
+    stored_filename: Optional[str] = None
+    if obj.resume_file is not None:
+        # Only delete physical file if no other candidate references the same ResumeFile
+        other_refs = (
+            await db.execute(
+                select(func.count())
+                .select_from(Candidate)
+                .where(
+                    Candidate.resume_file_id == obj.resume_file.id,
+                    Candidate.id != obj.id,
+                )
+            )
+        ).scalar_one()
+        if other_refs == 0:
+            stored_filename = obj.resume_file.stored_filename
+
     await db.delete(obj)
     await db.commit()
+
+    if stored_filename:
+        store = storage_backend or default_storage
+        await store.delete_file(stored_filename)
+
     return True

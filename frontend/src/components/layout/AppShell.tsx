@@ -1,7 +1,16 @@
 import type { ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
-import { ArrowRight, Brain, LayoutDashboard, LogOut, Sparkles, Upload } from 'lucide-react'
+import {
+  ArrowRight,
+  Brain,
+  Briefcase,
+  LayoutDashboard,
+  LogOut,
+  Sparkles,
+  Upload,
+  Users,
+} from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -20,7 +29,19 @@ const NAV: NavEntry[] = [
     to: '/',
     label: 'Dashboard',
     icon: LayoutDashboard,
-    match: (p) => p === '/' || p.startsWith('/candidates'),
+    match: (p) => p === '/',
+  },
+  {
+    to: '/candidates',
+    label: 'Candidates',
+    icon: Users,
+    match: (p) => p.startsWith('/candidates'),
+  },
+  {
+    to: '/jobs',
+    label: 'Jobs',
+    icon: Briefcase,
+    match: (p) => p.startsWith('/jobs'),
   },
   {
     to: '/upload',
@@ -52,8 +73,8 @@ function Sidebar() {
 
   const visibleNav = NAV.filter((item) => !item.writeOnly || canWrite)
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     navigate('/login', { replace: true })
   }
 
@@ -175,8 +196,8 @@ function MobileNav() {
         })}
         <button
           type="button"
-          onClick={() => {
-            logout()
+          onClick={async () => {
+            await logout()
             navigate('/login', { replace: true })
           }}
           aria-label="Sign out"

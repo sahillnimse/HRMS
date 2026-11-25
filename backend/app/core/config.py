@@ -59,10 +59,23 @@ class Settings(BaseSettings):
 
     # --- Security & Auth ---
     SECRET_KEY: str = DEFAULT_SECRET_KEY
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_COOKIE_NAME: str = "hrms_refresh_token"
+    REFRESH_COOKIE_SECURE: Optional[bool] = None
+    REFRESH_COOKIE_SAMESITE: str = "lax"
+    LOGIN_MAX_ATTEMPTS: int = 5
+    LOGIN_WINDOW_MINUTES: int = 15
+    LOGIN_LOCKOUT_MINUTES: int = 15
     BOOTSTRAP_ADMIN_EMAIL: Optional[str] = None
     BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = None
     BOOTSTRAP_ADMIN_NAME: str = "System Admin"
+
+    @property
+    def cookie_secure(self) -> bool:
+        if self.REFRESH_COOKIE_SECURE is not None:
+            return self.REFRESH_COOKIE_SECURE
+        return self.APP_ENV.lower() == "production"
 
     # CORS origins (accepts JSON array or comma-separated string)
     CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["http://localhost:5173"])

@@ -1,7 +1,8 @@
+from decimal import Decimal
 import enum
 from uuid import UUID as PyUUID
 
-from sqlalchemy import Boolean, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -84,6 +85,14 @@ class Candidate(Base):
     languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     certifications: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
 
+    # --- Compensation & Mobility (CTC fields visible to admin/recruiter only) ---
+    notice_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_ctc: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    expected_ctc: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    ctc_currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    preferred_locations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    open_to_relocate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     # --- Full raw parsed payload from AI ---
     raw_parsed_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
@@ -103,4 +112,14 @@ class Candidate(Base):
         uselist=False,
         cascade="all, delete-orphan",
         single_parent=True,
+    )
+    applications: Mapped[list["Application"]] = relationship(
+        "Application",
+        back_populates="candidate",
+        cascade="all, delete-orphan",
+    )
+    notes: Mapped[list["CandidateNote"]] = relationship(
+        "CandidateNote",
+        back_populates="candidate",
+        cascade="all, delete-orphan",
     )

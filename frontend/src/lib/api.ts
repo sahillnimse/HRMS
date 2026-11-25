@@ -1,54 +1,90 @@
-import axios, { isAxiosError } from 'axios'
+import axios, { isAxiosError, type InternalAxiosRequestConfig } from 'axios'
 
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-const TOKEN_STORAGE_KEY = 'hrms_access_token'
 export const UNAUTHORIZED_EVENT = 'hrms:unauthorized'
 
-export function getStoredToken(): string | null {
-  try {
-    return window.localStorage.getItem(TOKEN_STORAGE_KEY)
-  } catch {
-    return null
-  }
+// Short-lived access token lives ONLY in JS memory (never localStorage) to prevent XSS theft.
+// Long-lived session persistence is handled by the server's httpOnly refresh cookie.
+let inMemoryAccessToken: string | null = null
+
+export function getAccessToken(): string | null {
+  return inMemoryAccessToken
 }
 
-export function setStoredToken(token: string | null): void {
-  try {
-    if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token)
-    else window.localStorage.removeItem(TOKEN_STORAGE_KEY)
-  } catch {
-    // Ignore storage errors in restricted environments
-  }
+export function setAccessToken(token: string | null): void {
+  inMemoryAccessToken = token
 }
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 120000,
 })
 
+// Single-flight refresh promise so concurrent 401s trigger only one /auth/refresh rotation
+let refreshPromise: Promise<string | null> | null = null
+
+export async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post<{ access_token: string }>(
+        `${API_BASE_URL}/auth/refresh`,
+        {},
+        { withCredentials: true, timeout: 15000 },
+      )
+      .then((res) => {
+        setAccessToken(res.data.access_token)
+        return res.data.access_token
+      })
+      .catch(() => {
+        setAccessToken(null)
+        return null
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
 api.interceptors.request.use((config) => {
-  const token = getStoredToken()
-  if (token) {
+  if (inMemoryAccessToken) {
     config.headers = config.headers ?? {}
-    config.headers.Authorization = `Bearer ${token}`
+    config.headers.Authorization = `Bearer ${inMemoryAccessToken}`
   }
   return config
 })
 
+interface RetryableConfig extends InternalAxiosRequestConfig {
+  _retried?: boolean
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (
-      isAxiosError(error) &&
-      error.response?.status === 401 &&
-      !error.config?.url?.includes('/auth/login')
-    ) {
-      setStoredToken(null)
+  async (error) => {
+    if (!isAxiosError(error) || !error.config) {
+      return Promise.reject(error)
+    }
+
+    const original = error.config as RetryableConfig
+    const url = original.url || ''
+    const isAuthRoute =
+      url.includes('/auth/login') || url.includes('/auth/refresh') || url.includes('/auth/logout')
+
+    if (error.response?.status === 401 && !isAuthRoute && !original._retried) {
+      original._retried = true
+      const nextToken = await refreshAccessToken()
+      if (nextToken) {
+        original.headers = original.headers ?? {}
+        original.headers.Authorization = `Bearer ${nextToken}`
+        return api(original)
+      }
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
     }
+
     return Promise.reject(error)
   },
 )
@@ -60,10 +96,7 @@ export function getFileUrl(resumeFileId: string, download = false): string {
 }
 
 /** Fetch a resume file via authenticated Axios request and return a Blob. */
-export async function fetchResumeBlob(
-  resumeFileId: string,
-  download = false,
-): Promise<Blob> {
+export async function fetchResumeBlob(resumeFileId: string, download = false): Promise<Blob> {
   const response = await api.get<Blob>(`/resumes/${encodeURIComponent(resumeFileId)}/file`, {
     params: download ? { download: true } : undefined,
     responseType: 'blob',

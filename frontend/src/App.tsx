@@ -5,6 +5,9 @@ import { AppShell } from '@/components/layout/AppShell'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
+import CandidatesPage from '@/pages/CandidatesPage'
+import JobsPage from '@/pages/JobsPage'
+import JobDetailPage from '@/pages/JobDetailPage'
 import UploadPage from '@/pages/UploadPage'
 import ReviewPage from '@/pages/ReviewPage'
 import CandidateDetailPage from '@/pages/CandidateDetailPage'
@@ -22,6 +25,36 @@ function App() {
                 <ProtectedRoute>
                   <AppShell>
                     <DashboardPage />
+                  </AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/candidates"
+              element={
+                <ProtectedRoute>
+                  <AppShell>
+                    <CandidatesPage />
+                  </AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs"
+              element={
+                <ProtectedRoute>
+                  <AppShell>
+                    <JobsPage />
+                  </AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/:id"
+              element={
+                <ProtectedRoute>
+                  <AppShell>
+                    <JobDetailPage />
                   </AppShell>
                 </ProtectedRoute>
               }

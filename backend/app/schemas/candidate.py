@@ -44,6 +44,14 @@ class CandidateCreate(BaseModel):
     languages: List[str] = Field(default_factory=list)
     certifications: List[str] = Field(default_factory=list)
 
+    # Compensation & mobility
+    notice_period_days: Optional[int] = Field(None, ge=0)
+    current_ctc: Optional[float] = Field(None, ge=0)
+    expected_ctc: Optional[float] = Field(None, ge=0)
+    ctc_currency: Optional[str] = Field(None, max_length=10)
+    preferred_locations: List[str] = Field(default_factory=list)
+    open_to_relocate: Optional[bool] = None
+
     raw_parsed_data: dict = Field(default_factory=dict)
 
     # Duplicate resolution controls
@@ -73,6 +81,12 @@ class CandidateUpdate(BaseModel):
     hobbies_interests: Optional[List[str]] = None
     languages: Optional[List[str]] = None
     certifications: Optional[List[str]] = None
+    notice_period_days: Optional[int] = Field(None, ge=0)
+    current_ctc: Optional[float] = Field(None, ge=0)
+    expected_ctc: Optional[float] = Field(None, ge=0)
+    ctc_currency: Optional[str] = Field(None, max_length=10)
+    preferred_locations: Optional[List[str]] = None
+    open_to_relocate: Optional[bool] = None
     raw_parsed_data: Optional[dict] = None
     is_duplicate_flagged: Optional[bool] = None
 
@@ -104,6 +118,12 @@ class CandidateResponse(BaseModel):
     hobbies_interests: List[str]
     languages: List[str]
     certifications: List[str]
+    notice_period_days: Optional[int] = None
+    current_ctc: Optional[float] = None
+    expected_ctc: Optional[float] = None
+    ctc_currency: Optional[str] = None
+    preferred_locations: List[str] = Field(default_factory=list)
+    open_to_relocate: Optional[bool] = None
     raw_parsed_data: dict
     resume_file_id: Optional[UUID] = None
     is_duplicate_flagged: bool
@@ -125,9 +145,24 @@ class CandidateListItem(BaseModel):
     years_experience: float
     technical_skills: List[str]
     is_duplicate_flagged: bool = False
+    resume_file_id: Optional[UUID] = None
+    resume_filename: Optional[str] = None
     created_at: datetime
     current_title: Optional[str] = None
     current_company: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PendingResumeItem(BaseModel):
+    """Uploaded resume file not yet attached to a saved candidate."""
+
+    id: UUID
+    original_filename: str
+    file_size: int
+    content_type: str
+    status: str
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

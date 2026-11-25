@@ -7,6 +7,7 @@ interface ResumePreviewProps {
   resumeFileId: string | null
   originalFilename: string | null
   storedFilename?: string | null
+  previewHeightClass?: string
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -15,6 +16,7 @@ export function ResumePreview({
   resumeFileId,
   originalFilename,
   storedFilename,
+  previewHeightClass = 'h-72',
 }: ResumePreviewProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -136,7 +138,7 @@ export function ResumePreview({
             <iframe
               src={blobUrl}
               title={originalFilename || 'Resume PDF preview'}
-              className="h-72 w-full"
+              className={`w-full ${previewHeightClass}`}
             />
           ) : null}
         </div>

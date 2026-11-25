@@ -55,7 +55,10 @@ npm run dev
 | `DATABASE_URL_UNPOOLED` | Direct Postgres URL used by Alembic migrations | — |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Google Gemini (or OpenRouter `sk-or-`) key & model | `gemini-2.0-flash` |
 | `SECRET_KEY` | JWT signing key (must be ≥32 random chars in `production`) | `change-me-in-production` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT expiration window in minutes | `60` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Short-lived access JWT TTL in minutes | `15` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Rotating `HttpOnly` refresh cookie TTL in days | `7` |
+| `REFRESH_COOKIE_NAME` / `REFRESH_COOKIE_SECURE` / `REFRESH_COOKIE_SAMESITE` | Refresh cookie settings (`Secure` auto-enabled in production) | `hrms_refresh_token` / auto / `lax` |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES` / `LOGIN_LOCKOUT_MINUTES` | Login brute-force throttling & lockout window | `5` / `15` / `15` |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` / `BOOTSTRAP_ADMIN_NAME` | Optional auto-seeded initial admin on startup | — |
 | `STORAGE_BACKEND` | `local` (default), `s3`, or `r2` | `local` |
 | `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PREFIX` | Cloudflare R2 / S3 credentials when `STORAGE_BACKEND` is `s3` or `r2` | — |

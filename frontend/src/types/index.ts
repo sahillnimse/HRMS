@@ -50,6 +50,12 @@ export interface CandidateProfileData {
   hobbies_interests: string[]
   languages: string[]
   certifications: string[]
+  notice_period_days?: number | null
+  current_ctc?: number | null
+  expected_ctc?: number | null
+  ctc_currency?: string | null
+  preferred_locations?: string[]
+  open_to_relocate?: boolean | null
 }
 
 export interface ParsedResumeData extends CandidateProfileData {
@@ -90,9 +96,20 @@ export interface CandidateListItem {
   years_experience: number
   technical_skills: string[]
   is_duplicate_flagged?: boolean
+  resume_file_id?: string | null
+  resume_filename?: string | null
   created_at: string
   current_title?: string | null
   current_company?: string | null
+}
+
+export interface PendingResumeItem {
+  id: string
+  original_filename: string
+  file_size: number
+  content_type: string
+  status: string
+  created_at: string
 }
 
 export interface CandidateResponse extends ParsedResumeData {
@@ -155,7 +172,106 @@ export interface CandidateUpdate {
   hobbies_interests?: string[]
   languages?: string[]
   certifications?: string[]
+  notice_period_days?: number | null
+  current_ctc?: number | null
+  expected_ctc?: number | null
+  ctc_currency?: string | null
+  preferred_locations?: string[]
+  open_to_relocate?: boolean | null
   raw_parsed_data?: Record<string, unknown>
   allow_duplicate?: boolean
   is_duplicate_flagged?: boolean
+}
+
+export type JobStatus = 'draft' | 'open' | 'closed'
+
+export type ApplicationStage =
+  | 'applied'
+  | 'screened'
+  | 'interview'
+  | 'offer'
+  | 'hired'
+  | 'rejected'
+
+export interface JobItem {
+  id: string
+  title: string
+  department: string
+  location: string
+  description: string
+  required_skills: string[]
+  nice_to_have_skills: string[]
+  min_years: number | null
+  max_years: number | null
+  status: JobStatus
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  application_count: number
+  stage_counts: Record<string, number>
+}
+
+export interface JobPayload {
+  title: string
+  department: string
+  location: string
+  description: string
+  required_skills: string[]
+  nice_to_have_skills: string[]
+  min_years: number | null
+  max_years: number | null
+  status: JobStatus
+}
+
+export interface ApplicationCardCandidate {
+  id: string
+  full_name: string
+  email: string | null
+  city: string | null
+  primary_domain: string
+  years_experience: number
+  technical_skills: string[]
+  notice_period_days?: number | null
+}
+
+export interface ApplicationItem {
+  id: string
+  candidate_id: string
+  job_id: string
+  stage: ApplicationStage
+  stage_changed_at: string
+  rejection_reason: string | null
+  created_at: string
+  updated_at: string
+  candidate?: ApplicationCardCandidate | null
+  job_title?: string | null
+  job_department?: string | null
+  job_status?: JobStatus | null
+}
+
+export interface JobDetail extends JobItem {
+  applications: ApplicationItem[]
+}
+
+export interface CandidateNote {
+  id: string
+  candidate_id: string
+  author_id: string | null
+  author_name: string | null
+  author_email: string | null
+  body: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ActivityTimelineItem {
+  id: string
+  kind: 'stage_change' | 'note' | 'audit' | string
+  action: string
+  summary: string
+  actor_name: string | null
+  actor_email: string | null
+  metadata: Record<string, unknown>
+  timestamp: string
 }

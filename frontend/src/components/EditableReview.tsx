@@ -25,8 +25,10 @@ import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import { TagInput } from '@/components/ui/TagInput'
 import { ResumePreview } from '@/components/ResumePreview'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface EditableReviewProps {
   parsedData: ParsedResumeData
@@ -53,6 +55,7 @@ export function EditableReview({
 }: EditableReviewProps) {
   const [form, setForm] = useState<ParsedResumeData>(() => normalizeProfile(parsedData))
   const [errors, setErrors] = useState<FormErrors>({})
+  const { canWrite } = useAuth()
 
   const updateForm = (updater: (prev: ParsedResumeData) => ParsedResumeData) => {
     setForm((prev) => {
@@ -576,6 +579,129 @@ export function EditableReview({
                 value={form.hobbies_interests}
                 onChange={(next) => handleField('hobbies_interests', next)}
                 placeholder="Open source…"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Compensation & Mobility */}
+        <Card>
+          <CardHeader className="pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Briefcase size={16} className="text-emerald-600" />
+                <CardTitle>Compensation & Mobility</CardTitle>
+              </div>
+              <span className="text-xs text-slate-400">CTC fields restricted to Admin / Recruiter</span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="notice_period_days">Notice Period (days)</Label>
+                <Input
+                  id="notice_period_days"
+                  type="number"
+                  min={0}
+                  value={form.notice_period_days != null ? String(form.notice_period_days) : ''}
+                  onChange={(e) =>
+                    handleField(
+                      'notice_period_days',
+                      e.target.value !== '' ? parseInt(e.target.value, 10) : null,
+                    )
+                  }
+                  placeholder="30"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="open_to_relocate">Open to Relocate</Label>
+                <Select
+                  id="open_to_relocate"
+                  value={
+                    form.open_to_relocate === true
+                      ? 'yes'
+                      : form.open_to_relocate === false
+                        ? 'no'
+                        : ''
+                  }
+                  onChange={(e) =>
+                    handleField(
+                      'open_to_relocate',
+                      e.target.value === 'yes' ? true : e.target.value === 'no' ? false : null,
+                    )
+                  }
+                >
+                  <option value="">Not specified</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </Select>
+              </div>
+
+              {canWrite && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="ctc_currency">Currency</Label>
+                  <Select
+                    id="ctc_currency"
+                    value={form.ctc_currency ?? ''}
+                    onChange={(e) => handleField('ctc_currency', e.target.value || null)}
+                  >
+                    <option value="">Select currency</option>
+                    <option value="INR">INR</option>
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                    <option value="GBP">GBP</option>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {canWrite && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="current_ctc">Current CTC (Annual)</Label>
+                  <Input
+                    id="current_ctc"
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={form.current_ctc != null ? String(form.current_ctc) : ''}
+                    onChange={(e) =>
+                      handleField(
+                        'current_ctc',
+                        e.target.value !== '' ? parseFloat(e.target.value) : null,
+                      )
+                    }
+                    placeholder="e.g. 1200000"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expected_ctc">Expected CTC (Annual)</Label>
+                  <Input
+                    id="expected_ctc"
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={form.expected_ctc != null ? String(form.expected_ctc) : ''}
+                    onChange={(e) =>
+                      handleField(
+                        'expected_ctc',
+                        e.target.value !== '' ? parseFloat(e.target.value) : null,
+                      )
+                    }
+                    placeholder="e.g. 1600000"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label>Preferred Locations</Label>
+              <TagInput
+                value={form.preferred_locations ?? []}
+                onChange={(next) => handleField('preferred_locations', next)}
+                placeholder="Mumbai, Bengaluru, Remote…"
+                tone={{ bg: '#f0f9ff', text: '#075985' }}
               />
             </div>
           </CardContent>

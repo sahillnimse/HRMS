@@ -203,16 +203,84 @@ class Skills(BaseModel):
 
 
 class AdditionalInfo(BaseModel):
-    """Additional miscellaneous information."""
+    """Additional miscellaneous, compensation, and mobility information (extract only if explicitly present)."""
 
     hobbies_interests: List[str] = Field(default_factory=list)
     languages: List[str] = Field(default_factory=list, description="Languages spoken")
     certifications: List[str] = Field(default_factory=list)
+    notice_period_days: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Notice period in days ONLY if explicitly mentioned in the resume, else null",
+    )
+    current_ctc: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Current annual CTC numeric value ONLY if explicitly mentioned, else null",
+    )
+    expected_ctc: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Expected annual CTC numeric value ONLY if explicitly mentioned, else null",
+    )
+    ctc_currency: Optional[str] = Field(
+        None,
+        description="3-letter currency code (e.g. INR, USD, EUR) ONLY if CTC is mentioned, else null",
+    )
+    preferred_locations: List[str] = Field(
+        default_factory=list,
+        description="Preferred work locations ONLY if explicitly stated",
+    )
+    open_to_relocate: Optional[bool] = Field(
+        None,
+        description="Whether candidate explicitly stated openness to relocate, else null",
+    )
 
-    @field_validator("hobbies_interests", "languages", "certifications", mode="before")
+    @field_validator("hobbies_interests", "languages", "certifications", "preferred_locations", mode="before")
     @classmethod
     def normalize_additional_lists(cls, v: Any) -> List[str]:
         return _clean_str_list(v)
+
+    @field_validator("notice_period_days", mode="before")
+    @classmethod
+    def normalize_notice_days(cls, v: Any) -> Optional[int]:
+        if v is None or v == "":
+            return None
+        if isinstance(v, int):
+            return max(0, v)
+        match = re.search(r"\d+", str(v))
+        return int(match.group(0)) if match else None
+
+    @field_validator("current_ctc", "expected_ctc", mode="before")
+    @classmethod
+    def normalize_ctc(cls, v: Any) -> Optional[float]:
+        if v is None or v == "":
+            return None
+        if isinstance(v, (int, float)):
+            return max(0.0, float(v))
+        cleaned = str(v).replace(",", "")
+        match = re.search(r"\d+(\.\d+)?", cleaned)
+        return max(0.0, float(match.group(0))) if match else None
+
+    @field_validator("ctc_currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, v: Any) -> Optional[str]:
+        s = _clean_optional_str(v)
+        return s.upper()[:10] if s else None
+
+    @field_validator("open_to_relocate", mode="before")
+    @classmethod
+    def normalize_relocate(cls, v: Any) -> Optional[bool]:
+        if v is None or v == "":
+            return None
+        if isinstance(v, bool):
+            return v
+        low = str(v).strip().lower()
+        if low in {"true", "yes", "1"}:
+            return True
+        if low in {"false", "no", "0"}:
+            return False
+        return None
 
 
 class ParsedResume(BaseModel):
@@ -261,4 +329,10 @@ class ParsedResume(BaseModel):
             "hobbies_interests": self.additional_info.hobbies_interests,
             "languages": self.additional_info.languages,
             "certifications": self.additional_info.certifications,
+            "notice_period_days": self.additional_info.notice_period_days,
+            "current_ctc": self.additional_info.current_ctc,
+            "expected_ctc": self.additional_info.expected_ctc,
+            "ctc_currency": self.additional_info.ctc_currency,
+            "preferred_locations": self.additional_info.preferred_locations,
+            "open_to_relocate": self.additional_info.open_to_relocate,
         }
