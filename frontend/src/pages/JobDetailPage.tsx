@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Building2,
+  Check,
+  GitCompareArrows,
+  Kanban,
   MapPin,
   Search,
+  Sparkles,
   Trash2,
   UserPlus,
   X,
@@ -15,12 +19,14 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { KanbanBoard } from '@/components/KanbanBoard'
+import { ScoreBreakdownTooltip } from '@/components/ScoreBreakdownTooltip'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
 import { Avatar } from '@/components/ui/Avatar'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { cn, formatRelativeDate, formatYears } from '@/lib/utils'
 import type { ApplicationStage, JobStatus } from '@/types'
 
 export default function JobDetailPage() {
@@ -31,6 +37,10 @@ export default function JobDetailPage() {
   const {
     jobDetail,
     setJobDetail,
+    matches,
+    setMatches,
+    matchesLoading,
+    scoring,
     loading,
     error,
     fetchJobDetail,
@@ -39,9 +49,13 @@ export default function JobDetailPage() {
     addApplication,
     moveStage,
     removeApplication,
+    fetchJobMatches,
+    runJobMatch,
   } = useJobs()
   const { candidates, fetchCandidates } = useCandidates()
 
+  const [activeTab, setActiveTab] = useState<'kanban' | 'matches'>('kanban')
+  const [compareIds, setCompareIds] = useState<string[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [candSearch, setCandSearch] = useState('')
   const [addingId, setAddingId] = useState<string | null>(null)
@@ -49,8 +63,11 @@ export default function JobDetailPage() {
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
-    if (id) void fetchJobDetail(id)
-  }, [id, fetchJobDetail])
+    if (id) {
+      void fetchJobDetail(id)
+      void fetchJobMatches(id)
+    }
+  }, [id, fetchJobDetail, fetchJobMatches])
 
   useEffect(() => {
     if (showAddModal) {
@@ -62,6 +79,14 @@ export default function JobDetailPage() {
     () => new Set((jobDetail?.applications ?? []).map((a) => a.candidate_id)),
     [jobDetail],
   )
+
+  const toggleCompare = (candidateId: string) => {
+    setCompareIds((prev) => {
+      if (prev.includes(candidateId)) return prev.filter((item) => item !== candidateId)
+      if (prev.length >= 3) return prev
+      return [...prev, candidateId]
+    })
+  }
 
   const handleStatusChange = async (nextStatus: JobStatus) => {
     if (!id || !jobDetail) return
@@ -86,7 +111,10 @@ export default function JobDetailPage() {
           ? {
               ...a,
               stage: toStage,
-              rejection_reason: toStage === 'rejected' ? rejectionReason ?? a.rejection_reason : a.rejection_reason,
+              rejection_reason:
+                toStage === 'rejected'
+                  ? (rejectionReason ?? a.rejection_reason)
+                  : a.rejection_reason,
               stage_changed_at: new Date().toISOString(),
             }
           : a,
@@ -107,6 +135,13 @@ export default function JobDetailPage() {
           }
         : prev,
     )
+    setMatches((prev) =>
+      prev.map((m) =>
+        m.candidate_id === updated.candidate_id
+          ? { ...m, in_pipeline: true, application_stage: updated.stage }
+          : m,
+      ),
+    )
     addToast(`Moved to ${toStage}`, 'success')
   }
 
@@ -125,6 +160,13 @@ export default function JobDetailPage() {
             }
           : prev,
       )
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.candidate_id === candidateId
+            ? { ...m, in_pipeline: true, application_stage: created.stage }
+            : m,
+        ),
+      )
       addToast(`Added ${created.candidate?.full_name || 'candidate'} to pipeline`, 'success')
     } else {
       addToast('Candidate could not be added (may already be in this job)', 'error')
@@ -132,6 +174,7 @@ export default function JobDetailPage() {
   }
 
   const handleRemoveApplication = async (applicationId: string) => {
+    const removedApp = jobDetail?.applications.find((a) => a.id === applicationId)
     const ok = await removeApplication(applicationId)
     if (ok) {
       setJobDetail((prev) =>
@@ -143,7 +186,27 @@ export default function JobDetailPage() {
             }
           : prev,
       )
+      if (removedApp) {
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.candidate_id === removedApp.candidate_id
+              ? { ...m, in_pipeline: false, application_stage: null }
+              : m,
+          ),
+        )
+      }
       addToast('Removed candidate from job', 'info')
+    }
+  }
+
+  const handleRunMatch = async () => {
+    if (!id) return
+    const result = await runJobMatch(id, { include_explanations: true })
+    if (result) {
+      setActiveTab('matches')
+      addToast(`Scored ${result.length} candidate${result.length === 1 ? '' : 's'}`, 'success')
+    } else {
+      addToast('Failed to score candidates', 'error')
     }
   }
 
@@ -206,6 +269,10 @@ export default function JobDetailPage() {
                 <option value="draft">Draft</option>
                 <option value="closed">Closed</option>
               </Select>
+              <Button variant="outline" size="sm" loading={scoring} onClick={() => void handleRunMatch()}>
+                <Sparkles size={15} className="text-brand-600" />
+                {matches.length > 0 ? 'Re-score Matches' : 'Run Match Scoring'}
+              </Button>
               <Button size="sm" onClick={() => setShowAddModal(true)} className="shadow-glow">
                 <UserPlus size={15} />
                 Add Candidate
@@ -276,13 +343,247 @@ export default function JobDetailPage() {
         )}
       </div>
 
-      {/* Drag-and-Drop Kanban Board */}
-      <KanbanBoard
-        applications={jobDetail.applications}
-        canWrite={canWrite}
-        onMoveStage={handleMoveStage}
-        onRemoveApplication={handleRemoveApplication}
-      />
+      {/* View Tabs: Kanban Board | Ranked Matches */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setActiveTab('kanban')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold transition',
+              activeTab === 'kanban'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900',
+            )}
+          >
+            <Kanban size={14} />
+            Kanban Board
+            <span
+              className={cn(
+                'rounded-full px-1.5 py-0.5 text-[10px]',
+                activeTab === 'kanban'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-100 text-slate-600',
+              )}
+            >
+              {jobDetail.applications.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('matches')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold transition',
+              activeTab === 'matches'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900',
+            )}
+          >
+            <Sparkles size={14} />
+            Ranked Matches
+            <span
+              className={cn(
+                'rounded-full px-1.5 py-0.5 text-[10px]',
+                activeTab === 'matches'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-100 text-slate-600',
+              )}
+            >
+              {matches.length}
+            </span>
+          </button>
+        </div>
+
+        {activeTab === 'matches' && compareIds.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-600">
+              {compareIds.length}/3 selected
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setCompareIds([])}>
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              disabled={compareIds.length < 2}
+              onClick={() => navigate(`/compare?ids=${compareIds.join(',')}&jobId=${jobDetail.id}`)}
+            >
+              <GitCompareArrows size={14} />
+              Compare ({compareIds.length})
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Tab 1: Drag-and-Drop Kanban Board */}
+      {activeTab === 'kanban' && (
+        <KanbanBoard
+          applications={jobDetail.applications}
+          canWrite={canWrite}
+          onMoveStage={handleMoveStage}
+          onRemoveApplication={handleRemoveApplication}
+        />
+      )}
+
+      {/* Tab 2: Deterministic Ranked Matches */}
+      {activeTab === 'matches' && (
+        <div className="space-y-4">
+          {matchesLoading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="skeleton h-24 w-full rounded-2xl" />
+              ))}
+            </div>
+          ) : matches.length === 0 ? (
+            <div className="rounded-2xl border bg-white p-12 text-center shadow-card">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                <Sparkles size={22} />
+              </div>
+              <h3 className="text-base font-semibold text-slate-900">No match scores yet</h3>
+              <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+                Score every saved candidate against this job using deterministic skill coverage
+                (45%), experience fit (25%), nice-to-have skills (15%), and semantic similarity
+                (15%).
+              </p>
+              {canWrite && (
+                <Button className="mt-5 shadow-glow" loading={scoring} onClick={() => void handleRunMatch()}>
+                  <Sparkles size={15} />
+                  Run Match Scoring
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                <span>
+                  Select 2–3 candidates to compare side-by-side. Hover or click any score pill to
+                  inspect the full breakdown.
+                </span>
+                <span>Updated {formatRelativeDate(matches[0].computed_at)}</span>
+              </div>
+
+              {matches.map((m, idx) => {
+                const cand = m.candidate
+                const isSelected = compareIds.includes(m.candidate_id)
+                const selectDisabled = !isSelected && compareIds.length >= 3
+                return (
+                  <div
+                    key={m.id}
+                    className={cn(
+                      'rounded-2xl border bg-white p-4 shadow-card transition',
+                      isSelected
+                        ? 'border-brand-400 ring-2 ring-brand-500/15'
+                        : 'border-slate-200/80 hover:border-slate-300',
+                    )}
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <button
+                          type="button"
+                          disabled={selectDisabled}
+                          onClick={() => toggleCompare(m.candidate_id)}
+                          title={
+                            isSelected
+                              ? 'Remove from comparison'
+                              : selectDisabled
+                                ? 'Select up to 3 candidates'
+                                : 'Select to compare'
+                          }
+                          className={cn(
+                            'mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition',
+                            isSelected
+                              ? 'border-brand-600 bg-brand-600 text-white'
+                              : selectDisabled
+                                ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
+                                : 'border-slate-300 bg-white text-transparent hover:border-brand-400',
+                          )}
+                          aria-label={isSelected ? 'Deselect candidate' : 'Select candidate to compare'}
+                        >
+                          <Check size={13} />
+                        </button>
+
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-700 tabular-nums">
+                          #{idx + 1}
+                        </span>
+
+                        {cand && <Avatar name={cand.full_name} size="md" />}
+
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              to={`/candidates/${m.candidate_id}`}
+                              className="truncate text-sm font-semibold text-slate-900 hover:text-brand-600"
+                            >
+                              {cand?.full_name ?? 'Candidate'}
+                            </Link>
+                            {cand?.primary_domain && (
+                              <Badge variant="brand">{cand.primary_domain}</Badge>
+                            )}
+                            {cand && (
+                              <span className="text-xs text-slate-500">
+                                {formatYears(cand.years_experience)}
+                                {cand.city ? ` · ${cand.city}` : ''}
+                              </span>
+                            )}
+                          </div>
+
+                          {m.explanation && (
+                            <p className="text-xs leading-5 text-slate-600">{m.explanation}</p>
+                          )}
+
+                          {m.breakdown?.matched_required_skills?.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-0.5">
+                              {m.breakdown.matched_required_skills.slice(0, 6).map((sk) => (
+                                <span
+                                  key={`mreq-${m.id}-${sk}`}
+                                  className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700"
+                                >
+                                  {sk}
+                                </span>
+                              ))}
+                              {(m.breakdown.missing_required_skills ?? []).slice(0, 4).map((sk) => (
+                                <span
+                                  key={`mmis-${m.id}-${sk}`}
+                                  className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 line-through decoration-rose-400"
+                                >
+                                  {sk}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 flex-wrap items-center gap-2.5 lg:flex-col lg:items-end">
+                        <ScoreBreakdownTooltip
+                          score={m.score}
+                          breakdown={m.breakdown}
+                          align="right"
+                        />
+
+                        {m.in_pipeline ? (
+                          <Badge variant="secondary" className="capitalize">
+                            In pipeline · {m.application_stage || 'applied'}
+                          </Badge>
+                        ) : canWrite ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            loading={addingId === m.candidate_id}
+                            onClick={() => void handleAddCandidate(m.candidate_id)}
+                          >
+                            <UserPlus size={13} />
+                            Add to Pipeline
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add Candidate Modal */}
       {showAddModal && (

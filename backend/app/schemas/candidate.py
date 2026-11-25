@@ -8,7 +8,20 @@ the frontend stays end-to-end type-safe.
 from datetime import datetime
 from typing import Any, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+def _strip_internal_resume_text(value: Any) -> Any:
+    """Recursively strip `_resume_text` from dicts before serializing API responses."""
+    if isinstance(value, dict):
+        return {
+            k: _strip_internal_resume_text(v)
+            for k, v in value.items()
+            if k != "_resume_text"
+        }
+    if isinstance(value, list):
+        return [_strip_internal_resume_text(item) for item in value]
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +143,13 @@ class CandidateResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator("raw_parsed_data", mode="before")
+    @classmethod
+    def strip_resume_text(cls, v: Any) -> dict:
+        if not isinstance(v, dict):
+            return {}
+        return _strip_internal_resume_text(v)
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -207,6 +227,13 @@ class ResumeUploadResponse(BaseModel):
     """Response from POST /api/v1/resumes/upload."""
 
     resume_file_id: UUID
-    parsed_data: dict  # ParsedResume.to_flat_dict()
+    parsed_data: dict  # ParsedResume.to_flat_dict() without _resume_text
     duplicate: DuplicateInfo
     message: str
+
+    @field_validator("parsed_data", mode="before")
+    @classmethod
+    def strip_resume_text_from_upload(cls, v: Any) -> dict:
+        if not isinstance(v, dict):
+            return {}
+        return _strip_internal_resume_text(v)

@@ -54,6 +54,7 @@ npm run dev
 | `DATABASE_URL` | Pooled async Postgres URL for app traffic | local Postgres |
 | `DATABASE_URL_UNPOOLED` | Direct Postgres URL used by Alembic migrations | — |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Google Gemini (or OpenRouter `sk-or-`) key & model | `gemini-2.0-flash` |
+| `ENABLE_SEMANTIC_SEARCH` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | Feature-flagged pgvector + Gemini semantic search & matching | `true` / `gemini-embedding-001` / `768` |
 | `SECRET_KEY` | JWT signing key (must be ≥32 random chars in `production`) | `change-me-in-production` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Short-lived access JWT TTL in minutes | `15` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Rotating `HttpOnly` refresh cookie TTL in days | `7` |
@@ -71,6 +72,34 @@ npm run dev
 - **`admin`**: Full access + user management (`POST/GET /api/v1/auth/users`) + manual orphan cleanup (`POST /api/v1/resumes/cleanup`).
 - **`recruiter`**: Upload/parse resumes, create/edit/delete candidates, view profiles & stream resumes.
 - **`viewer`**: Read-only access (dashboard, candidate profiles, stats, authenticated resume viewing/downloading).
+
+## Deployment Topology (Vercel + Render + Neon + R2)
+
+```text
+Browser (https://your-app.vercel.app)
+   │  same-origin requests to /api/v1/* (HttpOnly; SameSite=Lax; Secure cookie)
+   ▼
+Vercel Edge (vercel.json)
+   ├── /api/(.*)  ──► https://<your-render-service>.onrender.com/api/$1
+   └── /(.*)      ──► /index.html (React SPA)
+                         │
+                         ▼
+                  Render Web Service (FastAPI + Alembic preDeployCommand)
+                    ├── Neon Lakebase Postgres (pooled DATABASE_URL + unpooled migrations)
+                    └── Cloudflare R2 / S3 (STORAGE_BACKEND=r2, streamed via auth endpoints)
+```
+
+### Why `/api/(.*)` is rewritten through Vercel
+The authentication refresh cookie uses `HttpOnly; SameSite=Lax; Secure; Path=/api/v1/auth`. If the browser called Render directly on a different domain (`*.onrender.com` from `*.vercel.app`), browsers would treat it as cross-site and withhold the `SameSite=Lax` refresh cookie. Proxying `/api/(.*)` through `vercel.json` keeps all API and auth calls strictly same-origin.
+
+### Required deployment settings
+1. **Vercel (`vercel.json`):**
+   - Replace `https://hrms-ai-backend.onrender.com` in `vercel.json` with your actual Render Web Service URL.
+   - Keep `VITE_API_BASE_URL=/api/v1` (relative — do **not** point it directly at `onrender.com`).
+2. **Render (`backend/render.yaml`):**
+   - `preDeployCommand: alembic upgrade head` applies migrations automatically before traffic switches (the Dockerfile `CMD` also runs `alembic upgrade head`).
+   - Set `REFRESH_COOKIE_SAMESITE=lax` and `REFRESH_COOKIE_SECURE=true` (consistent with HTTPS same-site via Vercel).
+   - Set `STORAGE_BACKEND=r2` and supply `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `GEMINI_API_KEY`, and `CORS_ORIGINS=https://your-app.vercel.app`.
 
 ## Running Tests
 

@@ -275,3 +275,83 @@ export interface ActivityTimelineItem {
   metadata: Record<string, unknown>
   timestamp: string
 }
+
+export interface SkillNormalization {
+  id: string
+  canonical_name: string
+  aliases: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface CandidateSearchItem extends CandidateListItem {
+  tools?: string[]
+  relevance_score?: number
+  fts_score?: number
+  trgm_score?: number
+  semantic_score?: number
+}
+
+export interface CandidateSearchResponse {
+  items: CandidateSearchItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  semantic_enabled: boolean
+  semantic_used: boolean
+  normalized_skills_filter: string[]
+}
+
+export interface JobMatchBreakdown {
+  weights: {
+    must_have: number
+    experience_fit: number
+    nice_to_have: number
+    semantic: number
+  }
+  must_have_score: number
+  matched_required_skills: string[]
+  missing_required_skills: string[]
+  experience_score: number
+  candidate_years: number
+  job_min_years: number | null
+  job_max_years: number | null
+  nice_to_have_score: number
+  matched_nice_skills: string[]
+  missing_nice_skills: string[]
+  semantic_score: number
+  semantic_mode: 'embedding' | 'lexical_fallback' | string
+}
+
+export interface JobMatchCandidateSummary {
+  id: string
+  full_name: string
+  email: string | null
+  city: string | null
+  primary_domain: string
+  years_experience: number
+  technical_skills: string[]
+  tools: string[]
+  notice_period_days?: number | null
+}
+
+export interface JobMatchItem {
+  id: string
+  job_id: string
+  candidate_id: string
+  score: number
+  breakdown: JobMatchBreakdown
+  explanation: string | null
+  model_version: string | null
+  computed_at: string
+  in_pipeline: boolean
+  application_stage: ApplicationStage | null
+  candidate?: JobMatchCandidateSummary | null
+}
+
+export interface CandidateCompareResponse {
+  candidates: CandidateResponse[]
+  shared_skills: string[]
+  job_matches: Record<string, JobMatchItem>
+}

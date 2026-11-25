@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
+from app.crud.matching import list_job_matches, run_job_matching
 from app.crud.pipeline import (
     create_application,
     create_job,
@@ -32,6 +33,7 @@ from app.crud.pipeline import (
 )
 from app.models.pipeline import JobStatus
 from app.models.user import User, UserRole
+from app.schemas.matching import JobMatchItem, JobMatchRequest
 from app.schemas.pipeline import (
     ApplicationCreate,
     ApplicationResponse,
@@ -106,6 +108,39 @@ async def delete_job_endpoint(
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return None
+
+
+@jobs_router.post("/{job_id}/match", response_model=List[JobMatchItem])
+async def match_job_candidates_endpoint(
+    job_id: UUID,
+    payload: Optional[JobMatchRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*WRITE_ROLES)),
+):
+    """Compute deterministic 0-100 JD match scores, cache in job_matches, and return ranked results."""
+    job = await get_job_by_id(db, job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    req = payload or JobMatchRequest()
+    return await run_job_matching(
+        db,
+        job,
+        candidate_ids=req.candidate_ids,
+        include_explanations=req.include_explanations,
+    )
+
+
+@jobs_router.get("/{job_id}/matches", response_model=List[JobMatchItem])
+async def list_job_matches_endpoint(
+    job_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """Return cached ranked JD match scores for a job."""
+    job = await get_job_by_id(db, job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return await list_job_matches(db, job_id)
 
 
 @applications_router.post(

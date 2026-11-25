@@ -47,10 +47,12 @@ export default function DashboardPage() {
     candidates,
     stats,
     pagination,
+    searchMeta,
     loading,
     statsLoading,
     error,
     fetchCandidates,
+    searchCandidates,
     fetchStats,
   } = useCandidates()
 
@@ -78,16 +80,21 @@ export default function DashboardPage() {
   }, [fetchStats])
 
   const loadPage = useCallback(() => {
-    fetchCandidates({
+    const trimmed = debouncedSearch.trim()
+    const common = {
       page,
       page_size: 18,
-      search: debouncedSearch.trim() || undefined,
       primary_domain: domain || undefined,
       skills: skills.length ? skills.join(',') : undefined,
       min_years: minYears !== '' ? parseFloat(minYears) : undefined,
       max_years: maxYears !== '' ? parseFloat(maxYears) : undefined,
-    })
-  }, [fetchCandidates, page, debouncedSearch, domain, skills, minYears, maxYears])
+    }
+    if (trimmed) {
+      void searchCandidates({ ...common, q: trimmed })
+    } else {
+      void fetchCandidates(common)
+    }
+  }, [fetchCandidates, searchCandidates, page, debouncedSearch, domain, skills, minYears, maxYears])
 
   useEffect(() => {
     loadPage()
@@ -360,7 +367,7 @@ export default function DashboardPage() {
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, email, or domain…"
+                placeholder="Hybrid search by name, skills, role, summary, or domain…"
                 className="pl-9 pr-8"
               />
               {search && (
@@ -435,10 +442,16 @@ export default function DashboardPage() {
 
       {/* Results Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm text-slate-600">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
           <span className="font-semibold text-slate-900">{pagination.total}</span>
           <span>candidate{pagination.total === 1 ? '' : 's'}</span>
           {activeFilterCount > 0 && <span className="text-slate-400">matching filters</span>}
+          {searchMeta.active && (
+            <Badge variant="brand" className="ml-1">
+              <Sparkles size={11} />
+              {searchMeta.semantic_used ? 'Hybrid Semantic + FTS' : 'Hybrid FTS + Fuzzy'}
+            </Badge>
+          )}
         </div>
 
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">

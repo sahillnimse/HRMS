@@ -1,21 +1,42 @@
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Briefcase, FileText, Mail, MapPin } from 'lucide-react'
-import type { CandidateListItem } from '@/types'
-import { formatRelativeDate, formatYears } from '@/lib/utils'
+import { ArrowUpRight, Briefcase, Check, FileText, Mail, MapPin, Sparkles } from 'lucide-react'
+import type { CandidateSearchItem } from '@/types'
+import { cn, formatRelativeDate, formatYears } from '@/lib/utils'
 import { getSeniority } from '@/lib/profile'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 
 interface CandidateCardProps {
-  candidate: CandidateListItem
+  candidate: CandidateSearchItem
+  selectable?: boolean
+  selected?: boolean
+  selectDisabled?: boolean
+  onToggleSelect?: (id: string) => void
 }
 
-export function CandidateCard({ candidate }: CandidateCardProps) {
+export function CandidateCard({
+  candidate,
+  selectable = false,
+  selected = false,
+  selectDisabled = false,
+  onToggleSelect,
+}: CandidateCardProps) {
   const roleLine = [candidate.current_title, candidate.current_company].filter(Boolean).join(' · ')
+  const relevance =
+    typeof candidate.relevance_score === 'number' && candidate.relevance_score > 0
+      ? Math.round(Math.min(100, candidate.relevance_score))
+      : null
 
   return (
     <Link to={`/candidates/${candidate.id}`} className="group block h-full">
-      <article className="flex h-full flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg">
+      <article
+        className={cn(
+          'flex h-full flex-col justify-between rounded-2xl border bg-white p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg',
+          selected
+            ? 'border-brand-500 ring-2 ring-brand-500/20'
+            : 'border-slate-200/80 hover:border-brand-200',
+        )}
+      >
         <div>
           {/* Top row */}
           <div className="flex items-start justify-between gap-3">
@@ -30,9 +51,40 @@ export function CandidateCard({ candidate }: CandidateCardProps) {
                 </p>
               </div>
             </div>
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-300 transition group-hover:bg-brand-50 group-hover:text-brand-600">
-              <ArrowUpRight size={16} />
-            </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {selectable && onToggleSelect && (
+                <button
+                  type="button"
+                  disabled={!selected && selectDisabled}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onToggleSelect(candidate.id)
+                  }}
+                  title={
+                    selected
+                      ? 'Remove from comparison'
+                      : selectDisabled
+                        ? 'Select up to 3 candidates to compare'
+                        : 'Select to compare'
+                  }
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-lg border text-xs transition',
+                    selected
+                      ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
+                      : selectDisabled
+                        ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
+                        : 'border-slate-200 bg-white text-slate-400 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600',
+                  )}
+                  aria-label={selected ? 'Deselect candidate' : 'Select candidate to compare'}
+                >
+                  <Check size={14} className={selected ? 'opacity-100' : 'opacity-40'} />
+                </button>
+              )}
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-300 transition group-hover:bg-brand-50 group-hover:text-brand-600">
+                <ArrowUpRight size={16} />
+              </span>
+            </div>
           </div>
 
           {/* Domain + Experience Pills */}
@@ -42,6 +94,12 @@ export function CandidateCard({ candidate }: CandidateCardProps) {
               <Briefcase size={11} />
               {formatYears(candidate.years_experience)} · {getSeniority(candidate.years_experience)}
             </Badge>
+            {relevance !== null && (
+              <Badge variant="success" className="tabular-nums">
+                <Sparkles size={10} />
+                {relevance}% match
+              </Badge>
+            )}
           </div>
 
           {/* Contact / Location metadata */}

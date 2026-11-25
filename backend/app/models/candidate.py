@@ -3,7 +3,7 @@ import enum
 from uuid import UUID as PyUUID
 
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -53,6 +53,33 @@ class Candidate(Base):
             postgresql_using="gin",
             postgresql_ops={"full_name": "gin_trgm_ops"},
         ),
+        Index(
+            "ix_candidates_email_trgm",
+            "email",
+            postgresql_using="gin",
+            postgresql_ops={"email": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_candidates_primary_domain_trgm",
+            "primary_domain",
+            postgresql_using="gin",
+            postgresql_ops={"primary_domain": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_candidates_technical_skills_gin",
+            "technical_skills",
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_candidates_tools_gin",
+            "tools",
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_candidates_search_vector_gin",
+            "search_vector",
+            postgresql_using="gin",
+        ),
     )
 
     # --- Contact Details (indexed for search/dedup) ---
@@ -95,6 +122,10 @@ class Candidate(Base):
 
     # --- Full raw parsed payload from AI ---
     raw_parsed_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # --- Search & semantic vector columns (Phase 2) ---
+    search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
+    embedding_json: Mapped[list[float] | None] = mapped_column(JSONB, nullable=True)
 
     # --- Duplicate flagging ---
     is_duplicate_flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

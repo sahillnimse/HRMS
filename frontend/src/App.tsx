@@ -11,6 +11,7 @@ import JobDetailPage from '@/pages/JobDetailPage'
 import UploadPage from '@/pages/UploadPage'
 import ReviewPage from '@/pages/ReviewPage'
 import CandidateDetailPage from '@/pages/CandidateDetailPage'
+import CompareCandidatesPage from '@/pages/CompareCandidatesPage'
 
 function App() {
   return (
@@ -85,6 +86,16 @@ function App() {
                 <ProtectedRoute>
                   <AppShell>
                     <CandidateDetailPage />
+                  </AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/compare"
+              element={
+                <ProtectedRoute>
+                  <AppShell>
+                    <CompareCandidatesPage />
                   </AppShell>
                 </ProtectedRoute>
               }

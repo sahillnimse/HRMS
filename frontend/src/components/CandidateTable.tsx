@@ -1,22 +1,37 @@
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, FileText } from 'lucide-react'
-import type { CandidateListItem } from '@/types'
-import { formatRelativeDate, formatYears } from '@/lib/utils'
+import { ArrowUpRight, Check, FileText } from 'lucide-react'
+import type { CandidateSearchItem } from '@/types'
+import { cn, formatRelativeDate, formatYears } from '@/lib/utils'
 import { getSeniority } from '@/lib/profile'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 
 interface CandidateTableProps {
-  candidates: CandidateListItem[]
+  candidates: CandidateSearchItem[]
+  selectedIds?: string[]
+  maxSelect?: number
+  onToggleSelect?: (id: string) => void
 }
 
-export function CandidateTable({ candidates }: CandidateTableProps) {
+export function CandidateTable({
+  candidates,
+  selectedIds = [],
+  maxSelect = 3,
+  onToggleSelect,
+}: CandidateTableProps) {
+  const selectable = Boolean(onToggleSelect)
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/70">
+              {selectable && (
+                <th className="w-10 pl-4 pr-1 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <span className="sr-only">Compare</span>
+                </th>
+              )}
               <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 Candidate
               </th>
@@ -40,8 +55,36 @@ export function CandidateTable({ candidates }: CandidateTableProps) {
           <tbody className="divide-y divide-slate-100">
             {candidates.map((c) => {
               const roleLine = [c.current_title, c.current_company].filter(Boolean).join(' · ')
+              const isSelected = selectedIds.includes(c.id)
+              const selectDisabled = !isSelected && selectedIds.length >= maxSelect
               return (
-                <tr key={c.id} className="group transition hover:bg-brand-50/40">
+                <tr
+                  key={c.id}
+                  className={cn(
+                    'group transition hover:bg-brand-50/40',
+                    isSelected && 'bg-brand-50/30',
+                  )}
+                >
+                  {selectable && onToggleSelect && (
+                    <td className="pl-4 pr-1 py-4">
+                      <button
+                        type="button"
+                        disabled={selectDisabled}
+                        onClick={() => onToggleSelect(c.id)}
+                        className={cn(
+                          'flex h-6 w-6 items-center justify-center rounded-md border transition',
+                          isSelected
+                            ? 'border-brand-600 bg-brand-600 text-white'
+                            : selectDisabled
+                              ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
+                              : 'border-slate-300 bg-white text-transparent hover:border-brand-400',
+                        )}
+                        aria-label={isSelected ? 'Deselect candidate' : 'Select candidate to compare'}
+                      >
+                        <Check size={13} />
+                      </button>
+                    </td>
+                  )}
                   <td className="px-5 py-4">
                     <Link to={`/candidates/${c.id}`} className="flex items-center gap-3">
                       <Avatar name={c.full_name} size="sm" />

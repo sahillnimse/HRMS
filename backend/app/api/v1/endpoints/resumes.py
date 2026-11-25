@@ -151,7 +151,6 @@ async def upload_resume(
         **flat,
         "_llm_years_experience": llm_years,
         "_computed_years_experience": computed_years,
-        "_resume_text": resume_text,
         "_source_filename": filename,
         "_stored_filename": file_meta["stored_filename"],
     }

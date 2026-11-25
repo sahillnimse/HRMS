@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
 
+    # --- Semantic Search & Embeddings (Phase 2) ---
+    ENABLE_SEMANTIC_SEARCH: bool = True
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
+    EMBEDDING_DIMENSIONS: int = 768
+
     # --- File Storage ---
     STORAGE_BACKEND: str = "local"  # "local" | "s3" | "r2"
     UPLOAD_DIR: str = "./uploads"

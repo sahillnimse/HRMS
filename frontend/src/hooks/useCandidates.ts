@@ -2,21 +2,35 @@ import { useState, useCallback } from 'react'
 import { api, getErrorMessage } from '@/lib/api'
 import type {
   CandidateFilters,
-  CandidateListItem,
   CandidateResponse,
+  CandidateSearchItem,
+  CandidateSearchResponse,
   CandidateStats,
   CandidateUpdate,
   PaginatedCandidates,
 } from '@/types'
 
+export interface HybridSearchMeta {
+  active: boolean
+  semantic_enabled: boolean
+  semantic_used: boolean
+  normalized_skills_filter: string[]
+}
+
 export function useCandidates() {
-  const [candidates, setCandidates] = useState<CandidateListItem[]>([])
+  const [candidates, setCandidates] = useState<CandidateSearchItem[]>([])
   const [stats, setStats] = useState<CandidateStats | null>(null)
   const [pagination, setPagination] = useState({
     total: 0,
     page: 1,
     page_size: 20,
     pages: 0,
+  })
+  const [searchMeta, setSearchMeta] = useState<HybridSearchMeta>({
+    active: false,
+    semantic_enabled: false,
+    semantic_used: false,
+    normalized_skills_filter: [],
   })
   const [loading, setLoading] = useState(false)
   const [statsLoading, setStatsLoading] = useState(false)
@@ -35,12 +49,54 @@ export function useCandidates() {
         page_size: response.data.page_size,
         pages: response.data.pages,
       })
+      setSearchMeta({
+        active: false,
+        semantic_enabled: false,
+        semantic_used: false,
+        normalized_skills_filter: [],
+      })
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load candidates'))
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const searchCandidates = useCallback(
+    async (params: {
+      q?: string
+      page?: number
+      page_size?: number
+      primary_domain?: string
+      skills?: string
+      min_years?: number
+      max_years?: number
+    }) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const response = await api.get<CandidateSearchResponse>('/candidates/search', { params })
+        setCandidates(response.data.items)
+        setPagination({
+          total: response.data.total,
+          page: response.data.page,
+          page_size: response.data.page_size,
+          pages: response.data.pages,
+        })
+        setSearchMeta({
+          active: true,
+          semantic_enabled: response.data.semantic_enabled,
+          semantic_used: response.data.semantic_used,
+          normalized_skills_filter: response.data.normalized_skills_filter || [],
+        })
+      } catch (err) {
+        setError(getErrorMessage(err, 'Failed to search candidates'))
+      } finally {
+        setLoading(false)
+      }
+    },
+    [],
+  )
 
   const fetchStats = useCallback(async () => {
     setStatsLoading(true)
@@ -124,11 +180,13 @@ export function useCandidates() {
     candidates,
     stats,
     pagination,
+    searchMeta,
     loading,
     statsLoading,
     error,
     selected,
     fetchCandidates,
+    searchCandidates,
     fetchStats,
     createCandidate,
     updateCandidate,

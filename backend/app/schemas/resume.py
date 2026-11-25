@@ -301,12 +301,12 @@ class ParsedResume(BaseModel):
     @field_validator("skills", mode="before")
     @classmethod
     def normalize_skills_obj(cls, v: Any) -> Any:
-        return v if isinstance(v, dict) else {}
+        return v if isinstance(v, (dict, Skills)) else {}
 
     @field_validator("additional_info", mode="before")
     @classmethod
     def normalize_additional_obj(cls, v: Any) -> Any:
-        return v if isinstance(v, dict) else {}
+        return v if isinstance(v, (dict, AdditionalInfo)) else {}
 
     def to_flat_dict(self) -> dict:
         """Convert to a flat dict suitable for storing in Candidate columns."""

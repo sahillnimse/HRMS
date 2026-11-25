@@ -1,10 +1,22 @@
 """End-to-end async HTTP tests for Phase 1 (Hiring Pipeline, Notes, CTC RBAC, Audit Logs)."""
 
+import json
+from pathlib import Path
 import uuid
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 
+from app.models.candidate import Candidate
 from app.models.pipeline import ApplicationEvent, AuditLog
+from app.schemas.resume import (
+    AdditionalInfo,
+    ContactDetails,
+    ParsedResume,
+    ProfileOverview,
+    Skills,
+)
+from app.services.file_storage import storage
 
 
 async def _login(client, email: str, password: str) -> dict[str, str]:
@@ -220,3 +232,162 @@ async def test_jobs_applications_kanban_events_notes_and_audit(
             )
         ).scalars().all()
         assert len(stage_audits) == 3
+
+
+async def test_resume_text_never_exposed_and_viewer_ctc_redacted_including_free_text(
+    client, seeded_users, db_session_factory, cleanup_records
+):
+    rec_h = await _login(client, seeded_users["recruiter"]["email"], seeded_users["recruiter"]["password"])
+    viewer_h = await _login(client, seeded_users["viewer"]["email"], seeded_users["viewer"]["password"])
+
+    tag = uuid.uuid4().hex[:6]
+    secret_resume_text = (
+        f"Rohan Verma {tag} Resume. Current CTC: 18 LPA. Expected CTC: 24 LPA. "
+        "Confidential salary expectation ₹24,00,000 per annum. $150,000/yr."
+    )
+
+    mock_parsed = ParsedResume(
+        contact=ContactDetails(
+            full_name=f"Rohan Verma {tag}",
+            email=f"rohan.{tag}@example.com",
+            city="Pune",
+        ),
+        profile=ProfileOverview(
+            summary="Senior engineer; Current CTC: 18 LPA, Expected CTC: 24 LPA, target $150,000/yr.",
+            years_experience=5.0,
+            primary_domain="Software Engineering",
+        ),
+        work_experience=[],
+        education=[],
+        skills=Skills(technical_skills=["Python"], tools=["Docker"], soft_skills=[]),
+        additional_info=AdditionalInfo(
+            current_ctc=1800000,
+            expected_ctc=2400000,
+            ctc_currency="INR",
+            notice_period_days=60,
+        ),
+    )
+
+    stored_name: str | None = None
+    try:
+        # 1. Verify upload response never contains _resume_text
+        with (
+            patch(
+                "app.api.v1.endpoints.resumes.extract_text",
+                new=AsyncMock(return_value=secret_resume_text),
+            ),
+            patch(
+                "app.api.v1.endpoints.resumes.GeminiParser.__init__",
+                new=lambda self, *a, **k: None,
+            ),
+            patch(
+                "app.api.v1.endpoints.resumes.GeminiParser.parse_resume",
+                new=AsyncMock(return_value=mock_parsed),
+            ),
+        ):
+            up = await client.post(
+                "/api/v1/resumes/upload",
+                headers=rec_h,
+                files={"file": ("rohan.pdf", b"%PDF-1.4 rohan", "application/pdf")},
+            )
+            assert up.status_code == 200, up.text
+            up_body = up.json()
+            rf_id = uuid.UUID(up_body["resume_file_id"])
+            cleanup_records["resume_files"].append(rf_id)
+            stored_name = up_body["parsed_data"]["raw_parsed_data"]["_stored_filename"]
+            assert "_resume_text" not in json.dumps(up_body)
+
+        # 2. Save candidate WITH _resume_text stored server-side in DB raw_parsed_data
+        #    and CTC written in free text (summary, bullets, raw_parsed_data)
+        payload = {
+            "resume_file_id": str(rf_id),
+            **up_body["parsed_data"],
+            "work_experience": [
+                {
+                    "company": "Acme",
+                    "job_title": "Engineer",
+                    "start_date": "Jan 2020",
+                    "end_date": "Present",
+                    "bullets": ["Built APIs; compensation package ₹18,00,000 p.a."],
+                }
+            ],
+            "raw_parsed_data": {
+                **up_body["parsed_data"]["raw_parsed_data"],
+                "_resume_text": secret_resume_text,
+                "current_ctc": 1800000,
+                "expected_ctc": 2400000,
+                "ctc_currency": "INR",
+                "free_note": "Candidate asked for Expected CTC: 24 LPA or $150,000/yr",
+            },
+        }
+        created = await client.post("/api/v1/candidates/", headers=rec_h, json=payload)
+        assert created.status_code == 201, created.text
+        cand_id = uuid.UUID(created.json()["id"])
+        cleanup_records["candidates"].append(cand_id)
+
+        # Create response itself never leaks _resume_text
+        assert "_resume_text" not in json.dumps(created.json())
+
+        # Confirm _resume_text IS preserved in DB only
+        async with db_session_factory() as db:
+            db_cand = (await db.execute(select(Candidate).where(Candidate.id == cand_id))).scalar_one()
+            assert db_cand.raw_parsed_data.get("_resume_text") == secret_resume_text
+
+        # Confirm recruiter GET and PUT never expose _resume_text, while DB retains it
+        rec_get = await client.get(f"/api/v1/candidates/{cand_id}", headers=rec_h)
+        assert rec_get.status_code == 200
+        assert "_resume_text" not in json.dumps(rec_get.json())
+        assert rec_get.json()["current_ctc"] == 1800000
+
+        rec_put = await client.put(
+            f"/api/v1/candidates/{cand_id}",
+            headers=rec_h,
+            json={"raw_parsed_data": rec_get.json()["raw_parsed_data"], "city": "Mumbai"},
+        )
+        assert rec_put.status_code == 200
+        assert "_resume_text" not in json.dumps(rec_put.json())
+
+        async with db_session_factory() as db:
+            db_cand = (await db.execute(select(Candidate).where(Candidate.id == cand_id))).scalar_one()
+            assert db_cand.raw_parsed_data.get("_resume_text") == secret_resume_text
+
+        # 3. Viewer detail AND export responses MUST NOT contain _resume_text or ANY CTC values
+        forbidden_substrings = [
+            "_resume_text",
+            "1800000",
+            "2400000",
+            "18 LPA",
+            "24 LPA",
+            "24,00,000",
+            "18,00,000",
+            "$150,000",
+            "Confidential salary",
+        ]
+        for path in (f"/api/v1/candidates/{cand_id}", f"/api/v1/candidates/{cand_id}/export"):
+            resp = await client.get(path, headers=viewer_h)
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["current_ctc"] is None
+            assert body["expected_ctc"] is None
+            assert body["ctc_currency"] is None
+            assert body["notice_period_days"] == 60
+
+            serialized = json.dumps(body)
+            for forbidden in forbidden_substrings:
+                assert forbidden not in serialized, f"{forbidden!r} leaked in {path}: {serialized}"
+    finally:
+        if stored_name:
+            await storage.delete_file(stored_name)
+
+
+def test_vercel_json_rewrites_api_before_spa_catch_all():
+    repo_root = Path(__file__).resolve().parents[2]
+    cfg = json.loads((repo_root / "vercel.json").read_text(encoding="utf-8"))
+    rewrites = cfg.get("rewrites", [])
+    assert len(rewrites) >= 2
+    assert rewrites[0]["source"] == "/api/(.*)"
+    assert rewrites[0]["destination"].startswith("https://")
+    assert rewrites[0]["destination"].endswith("/api/$1")
+    assert rewrites[1]["source"] == "/(.*)"
+    assert rewrites[1]["destination"] == "/index.html"
+

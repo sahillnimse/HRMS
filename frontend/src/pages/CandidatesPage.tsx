@@ -6,9 +6,11 @@ import {
   Clock,
   ExternalLink,
   FileText,
+  GitCompareArrows,
   LayoutGrid,
   List,
   Search,
+  Sparkles,
   Upload,
   Users,
   X,
@@ -41,8 +43,17 @@ function getCachedUploads(): Record<string, ResumeUploadResponse> {
 export default function CandidatesPage() {
   const navigate = useNavigate()
   const { canWrite } = useAuth()
-  const { candidates, stats, pagination, loading, error, fetchCandidates, fetchStats } =
-    useCandidates()
+  const {
+    candidates,
+    stats,
+    pagination,
+    searchMeta,
+    loading,
+    error,
+    fetchCandidates,
+    searchCandidates,
+    fetchStats,
+  } = useCandidates()
 
   const [view, setView] = useState<'grid' | 'table'>('grid')
   const [page, setPage] = useState(1)
@@ -51,6 +62,7 @@ export default function CandidatesPage() {
   const [domain, setDomain] = useState('')
   const [pendingResumes, setPendingResumes] = useState<PendingResumeItem[]>([])
   const [openingId, setOpeningId] = useState<string | null>(null)
+  const [compareIds, setCompareIds] = useState<string[]>([])
 
   const cachedUploads = useMemo(() => getCachedUploads(), [])
 
@@ -71,13 +83,30 @@ export default function CandidatesPage() {
   }, [fetchStats])
 
   const loadCandidates = useCallback(() => {
-    fetchCandidates({
-      page,
-      page_size: 18,
-      search: debouncedSearch.trim() || undefined,
-      primary_domain: domain || undefined,
+    const trimmed = debouncedSearch.trim()
+    if (trimmed) {
+      void searchCandidates({
+        page,
+        page_size: 18,
+        q: trimmed,
+        primary_domain: domain || undefined,
+      })
+    } else {
+      void fetchCandidates({
+        page,
+        page_size: 18,
+        primary_domain: domain || undefined,
+      })
+    }
+  }, [fetchCandidates, searchCandidates, page, debouncedSearch, domain])
+
+  const toggleCompare = useCallback((id: string) => {
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((item) => item !== id)
+      if (prev.length >= 3) return prev
+      return [...prev, id]
     })
-  }, [fetchCandidates, page, debouncedSearch, domain])
+  }, [])
 
   useEffect(() => {
     loadCandidates()
@@ -197,7 +226,7 @@ export default function CandidatesPage() {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search candidates by name, email, or domain…"
+              placeholder="Hybrid search by name, skills, role, or domain…"
               className="pl-9 pr-8"
             />
             {search && (
@@ -232,6 +261,12 @@ export default function CandidatesPage() {
           <Badge variant="secondary" className="w-fit">
             {pagination.total} saved candidate{pagination.total === 1 ? '' : 's'}
           </Badge>
+          {searchMeta.active && (
+            <Badge variant="brand" className="w-fit">
+              <Sparkles size={11} />
+              {searchMeta.semantic_used ? 'Semantic + FTS' : 'Hybrid FTS'}
+            </Badge>
+          )}
         </div>
 
         <div className="inline-flex self-end rounded-xl border border-slate-200 bg-slate-50/70 p-1 sm:self-auto">
@@ -328,16 +363,54 @@ export default function CandidatesPage() {
         </div>
       )}
 
+      {compareIds.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-200 bg-brand-50/70 px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2 text-xs font-medium text-brand-900">
+            <GitCompareArrows size={16} className="text-brand-600" />
+            <span>
+              <span className="font-bold">{compareIds.length}</span> of 3 candidates selected for
+              comparison
+              {compareIds.length < 2 ? ' (pick at least 2)' : ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setCompareIds([])}>
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              disabled={compareIds.length < 2}
+              onClick={() => navigate(`/compare?ids=${compareIds.join(',')}`)}
+            >
+              <GitCompareArrows size={14} />
+              Compare ({compareIds.length})
+            </Button>
+          </div>
+        </div>
+      )}
+
       {!loading && candidates.length > 0 && view === 'grid' && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {candidates.map((c) => (
-            <CandidateCard key={c.id} candidate={c} />
+            <CandidateCard
+              key={c.id}
+              candidate={c}
+              selectable
+              selected={compareIds.includes(c.id)}
+              selectDisabled={compareIds.length >= 3}
+              onToggleSelect={toggleCompare}
+            />
           ))}
         </div>
       )}
 
       {!loading && candidates.length > 0 && view === 'table' && (
-        <CandidateTable candidates={candidates} />
+        <CandidateTable
+          candidates={candidates}
+          selectedIds={compareIds}
+          maxSelect={3}
+          onToggleSelect={toggleCompare}
+        />
       )}
 
       {!loading && pagination.pages > 1 && (

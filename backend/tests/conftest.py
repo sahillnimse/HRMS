@@ -18,6 +18,7 @@ from app.crud.user import create_user  # noqa: E402
 from app.db.session import _normalize_asyncpg_url  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models.candidate import Candidate, ResumeFile  # noqa: E402
+from app.models.matching import SkillNormalization  # noqa: E402
 from app.models.pipeline import AuditLog, Job  # noqa: E402
 from app.models.user import User, UserRole  # noqa: E402
 
@@ -101,7 +102,13 @@ async def seeded_users(db_session_factory):
 @pytest_asyncio.fixture
 async def cleanup_records(db_session_factory):
     """Track IDs created during a test and purge them afterwards."""
-    tracker: dict[str, list] = {"candidates": [], "resume_files": [], "users": [], "jobs": []}
+    tracker: dict[str, list] = {
+        "candidates": [],
+        "resume_files": [],
+        "users": [],
+        "jobs": [],
+        "skill_normalizations": [],
+    }
     try:
         yield tracker
     finally:
@@ -119,6 +126,12 @@ async def cleanup_records(db_session_factory):
                 await db.execute(delete(Candidate).where(Candidate.id.in_(tracker["candidates"])))
             if tracker["resume_files"]:
                 await db.execute(delete(ResumeFile).where(ResumeFile.id.in_(tracker["resume_files"])))
+            if tracker["skill_normalizations"]:
+                await db.execute(
+                    delete(SkillNormalization).where(
+                        SkillNormalization.id.in_(tracker["skill_normalizations"])
+                    )
+                )
             if tracker["users"]:
                 await db.execute(delete(User).where(User.id.in_(tracker["users"])))
             await db.commit()

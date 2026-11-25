@@ -5,6 +5,7 @@ import type {
   ApplicationStage,
   JobDetail,
   JobItem,
+  JobMatchItem,
   JobPayload,
   JobStatus,
 } from '@/types'
@@ -12,6 +13,9 @@ import type {
 export function useJobs() {
   const [jobs, setJobs] = useState<JobItem[]>([])
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null)
+  const [matches, setMatches] = useState<JobMatchItem[]>([])
+  const [matchesLoading, setMatchesLoading] = useState(false)
+  const [scoring, setScoring] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -134,10 +138,53 @@ export function useJobs() {
     }
   }, [])
 
+  const fetchJobMatches = useCallback(async (jobId: string): Promise<JobMatchItem[]> => {
+    setMatchesLoading(true)
+    setError(null)
+    try {
+      const res = await api.get<JobMatchItem[]>(`/jobs/${jobId}/matches`)
+      setMatches(res.data)
+      return res.data
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load match scores'))
+      return []
+    } finally {
+      setMatchesLoading(false)
+    }
+  }, [])
+
+  const runJobMatch = useCallback(
+    async (
+      jobId: string,
+      opts?: { candidate_ids?: string[]; include_explanations?: boolean },
+    ): Promise<JobMatchItem[] | null> => {
+      setScoring(true)
+      setError(null)
+      try {
+        const res = await api.post<JobMatchItem[]>(`/jobs/${jobId}/match`, {
+          candidate_ids: opts?.candidate_ids ?? null,
+          include_explanations: opts?.include_explanations ?? true,
+        })
+        setMatches(res.data)
+        return res.data
+      } catch (err) {
+        setError(getErrorMessage(err, 'Failed to run match scoring'))
+        return null
+      } finally {
+        setScoring(false)
+      }
+    },
+    [],
+  )
+
   return {
     jobs,
     jobDetail,
     setJobDetail,
+    matches,
+    setMatches,
+    matchesLoading,
+    scoring,
     loading,
     error,
     fetchJobs,
@@ -148,5 +195,7 @@ export function useJobs() {
     addApplication,
     moveStage,
     removeApplication,
+    fetchJobMatches,
+    runJobMatch,
   }
 }
