@@ -125,19 +125,19 @@ export function CandidateProfileOverview({
     <div className="space-y-6 animate-fade-in">
       {/* Hero Dossier Header */}
       <div className="overflow-hidden rounded-2xl border bg-white shadow-card">
-        <div className="relative h-24 bg-gradient-to-r from-brand-50 via-indigo-50/70 to-violet-50 bg-dots">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/60" />
+        <div className="relative h-20 bg-gradient-to-r from-brand-100/70 via-indigo-50 to-violet-100/70 bg-dots">
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/40" />
         </div>
 
-        <div className="px-6 pb-6">
-          <div className="-mt-12 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="relative z-10 px-6 pb-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
               <Avatar
                 name={profile.full_name}
                 size="xl"
-                className="ring-4 ring-white shadow-md"
+                className="-mt-12 ring-4 ring-white shadow-md"
               />
-              <div className="space-y-1.5 pb-1">
+              <div className="space-y-1.5 pt-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-2xl font-bold tracking-tight text-slate-900">
                     {profile.full_name || 'Unnamed Candidate'}
@@ -201,7 +201,7 @@ export function CandidateProfileOverview({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 lg:pt-3">
               <CompletenessRing score={completeness.score} missing={completeness.missing} />
               {headerActions}
             </div>

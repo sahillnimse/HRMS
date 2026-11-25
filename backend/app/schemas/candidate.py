@@ -1,14 +1,14 @@
 """
 Pydantic v2 schemas for Candidate API request/response.
 
-Mirrors the SQLAlchemy Candidate model and the ParsedResume Gemini schema so
+Mirrors the SQLAlchemy Candidate model and the ParsedResume schema so
 the frontend stays end-to-end type-safe.
 """
 
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import Any, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 # ---------------------------------------------------------------------------
@@ -46,10 +46,15 @@ class CandidateCreate(BaseModel):
 
     raw_parsed_data: dict = Field(default_factory=dict)
 
+    # Duplicate resolution controls
+    allow_duplicate: bool = False
+    is_duplicate_flagged: bool = False
+
 
 class CandidateUpdate(BaseModel):
-    """Partial update payload for editing a saved candidate."""
+    """Partial update payload for editing or updating an existing candidate."""
 
+    resume_file_id: Optional[UUID] = None
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
@@ -69,6 +74,7 @@ class CandidateUpdate(BaseModel):
     languages: Optional[List[str]] = None
     certifications: Optional[List[str]] = None
     raw_parsed_data: Optional[dict] = None
+    is_duplicate_flagged: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +88,7 @@ class CandidateResponse(BaseModel):
     full_name: str
     email: Optional[str] = None
     phone: Optional[str] = None
+    phone_normalized: Optional[str] = None
     city: Optional[str] = None
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
@@ -117,6 +124,7 @@ class CandidateListItem(BaseModel):
     primary_domain: str
     years_experience: float
     technical_skills: List[str]
+    is_duplicate_flagged: bool = False
     created_at: datetime
     current_title: Optional[str] = None
     current_company: Optional[str] = None
@@ -140,17 +148,28 @@ class CandidateStats(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Upload / parse responses
+# Upload / parse / duplicate responses
 # ---------------------------------------------------------------------------
+
+class DuplicateMatch(BaseModel):
+    candidate_id: UUID
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    primary_domain: str
+    matched_fields: List[str] = Field(default_factory=list)
+    name_similarity: Optional[float] = None
+
 
 class DuplicateInfo(BaseModel):
     is_duplicate: bool
     candidate_id: Optional[UUID] = None
-    matched_field: Optional[str] = None  # "email" | "phone" | None
+    matched_field: Optional[str] = None
+    matches: List[DuplicateMatch] = Field(default_factory=list)
 
 
 class ResumeUploadResponse(BaseModel):
-    """Response from POST /api/resumes/upload."""
+    """Response from POST /api/v1/resumes/upload."""
 
     resume_file_id: UUID
     parsed_data: dict  # ParsedResume.to_flat_dict()

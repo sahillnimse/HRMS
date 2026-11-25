@@ -1,104 +1,82 @@
 # HRMS AI — AI-Powered Resume Parser & Candidate Manager
 
-Production-ready HRMS where HR teams upload candidate CVs (PDF/DOCX) and get a
-simplified, structured candidate profile parsed by Google Gemini with
-human-in-the-loop review before saving to PostgreSQL.
+Production-ready HRMS where HR teams upload candidate CVs (PDF/DOCX), inspect an auto-generated candidate profile & interactive skill network graph, resolve duplicates, and manage candidates in PostgreSQL (Neon).
 
 ## Tech Stack
 
-- **Frontend:** React (Vite), Tailwind CSS, Lucide Icons, `react-dropzone`
-- **Backend:** Python (FastAPI), Pydantic v2, SQLAlchemy (async) + `asyncpg`
-- **Database:** PostgreSQL (JSONB for nested resume sections, indexed columns for search)
-- **AI:** Google Gemini (`google-genai`) with Structured Outputs
-- **Storage:** Local (dev) with abstraction layer for Supabase Storage / Cloudflare R2
+- **Frontend:** React 18 (Vite), TypeScript, Tailwind CSS, Lucide Icons, `react-dropzone`
+- **Backend:** Python (FastAPI), Pydantic v2, SQLAlchemy 2.0 async + `asyncpg`, Alembic migrations
+- **Auth:** Argon2id password hashing + PyJWT bearer tokens with role-based access (`admin`, `recruiter`, `viewer`)
+- **Database:** PostgreSQL / Neon Lakebase Postgres (JSONB + `pg_trgm` fuzzy name matching)
+- **AI:** Google Gemini (`google-genai`) structured output (also supports OpenRouter)
+- **Storage:** `BaseStorage` abstraction — `LocalStorage` (dev default) and `S3Storage` (Cloudflare R2 / S3) with authenticated file streaming
 
-## Monorepo Layout
+## Quick Start (Manual)
 
-```
-hrms-ai/
-├── backend/          # FastAPI app
-├── frontend/         # React + Vite app
-├── docker-compose.yml
-├── vercel.json
-├── backend/render.yaml
-└── README.md
-```
-
-## Quick Start (Docker Compose)
-
-```bash
-# 1. Copy env files
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-
-# 2. Edit backend/.env and add your GEMINI_API_KEY
-
-# 3. Start everything
-docker-compose up --build
-
-# Services:
-# - Frontend:  http://localhost:5173
-# - Backend:   http://localhost:8000
-# - API Docs:  http://localhost:8000/docs
-# - DB:        localhost:5432
-```
-
-## Manual Setup
-
-### Backend
+### 1. Backend
 
 ```bash
 cd backend
+cp .env.example .env
+# Edit backend/.env with DATABASE_URL, DATABASE_URL_UNPOOLED, GEMINI_API_KEY, SECRET_KEY
+
+python -m venv venv
+# Windows: venv\Scripts\activate  |  macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-# Set DATABASE_URL and GEMINI_API_KEY in .env
+
+# Apply database migrations (uses DATABASE_URL_UNPOOLED)
+alembic upgrade head
+
+# Create an initial admin account
+python -m app.scripts.create_admin --email admin@company.com --password "strong-password" --name "Admin" --role admin
+
+# Start API server
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend
+### 2. Frontend
 
 ```bash
 cd frontend
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-## Deployment
+- **Frontend:** http://localhost:5173 (sign in at `/login`)
+- **Backend API Docs:** http://localhost:8000/docs
 
-### Backend — Render
+## Environment Variables (`backend/.env.example`)
 
-1. Push code to GitHub.
-2. In Render, create a **Web Service** from the `backend/` directory using `Dockerfile`.
-3. Add environment variables from `backend/.env.example` (especially `GEMINI_API_KEY`, `SECRET_KEY`, `CORS_ORIGINS`).
-4. Create a **PostgreSQL** database on Render (or use Supabase/Render DB) and set `DATABASE_URL`.
-5. Deploy.
+| Variable | Description | Default |
+|---|---|---|
+| `APP_ENV` | `development` or `production` (production enforces strong `SECRET_KEY`) | `development` |
+| `DATABASE_URL` | Pooled async Postgres URL for app traffic | local Postgres |
+| `DATABASE_URL_UNPOOLED` | Direct Postgres URL used by Alembic migrations | — |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Google Gemini (or OpenRouter `sk-or-`) key & model | `gemini-2.0-flash` |
+| `SECRET_KEY` | JWT signing key (must be ≥32 random chars in `production`) | `change-me-in-production` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT expiration window in minutes | `60` |
+| `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` / `BOOTSTRAP_ADMIN_NAME` | Optional auto-seeded initial admin on startup | — |
+| `STORAGE_BACKEND` | `local` (default), `s3`, or `r2` | `local` |
+| `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PREFIX` | Cloudflare R2 / S3 credentials when `STORAGE_BACKEND` is `s3` or `r2` | — |
+| `ORPHAN_MAX_AGE_HOURS` / `ORPHAN_CLEANUP_INTERVAL_MINUTES` / `ENABLE_CLEANUP_SCHEDULER` | Scheduled cleanup of unattached `pending` resume files | `24` / `60` / `true` |
+| `DUPLICATE_NAME_SIMILARITY_THRESHOLD` | `pg_trgm` fuzzy name duplicate threshold (`0.0`–`1.0`) | `0.6` |
+| `CORS_ORIGINS` | Allowed frontend origins (JSON array or comma-separated) | `["http://localhost:5173"]` |
 
-See `backend/render.yaml` for a Render blueprint example.
+## Roles & Permissions
 
-### Database — Supabase / Render
+- **`admin`**: Full access + user management (`POST/GET /api/v1/auth/users`) + manual orphan cleanup (`POST /api/v1/resumes/cleanup`).
+- **`recruiter`**: Upload/parse resumes, create/edit/delete candidates, view profiles & stream resumes.
+- **`viewer`**: Read-only access (dashboard, candidate profiles, stats, authenticated resume viewing/downloading).
 
-- Use standard indexed columns + JSONB as defined in `backend/app/models/candidate.py`.
-- Connection string format: `postgresql+asyncpg://user:pass@host:5432/db`
+## Running Tests
 
-### Frontend — Vercel
+```bash
+cd backend
+pytest
+```
 
-1. Connect the `frontend/` directory to Vercel.
-2. Set build command: `npm run build`, output directory: `dist`.
-3. Add env var: `VITE_API_BASE_URL=https://your-backend.onrender.com/api/v1`.
-4. Deploy.
-
-See `vercel.json`.
-
-## Core Features
-
-1. **`POST /api/v1/resumes/upload`** — Upload PDF/DOCX, extract text, parse with Gemini
-   structured output, check PostgreSQL for duplicates by email/phone.
-2. **Human-in-the-loop Review** — Editable form next to original resume preview;
-   HR fixes errors before clicking "Save Candidate".
-3. **Candidate Dashboard** — Searchable/filterable table/cards; filter by skills,
-   domain, years of experience; click to view full profile and download CV.
-
-## Storage Abstraction
-
-`backend/app/services/file_storage.py` defines `BaseStorage`. `LocalStorage` is
-the dev implementation. To swap to Supabase Storage or Cloudflare R2, subclass
-`BaseStorage` — no route or CRUD changes needed.
+```bash
+cd frontend
+npx tsc --noEmit && npm run build
+```

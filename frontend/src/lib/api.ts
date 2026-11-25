@@ -1,6 +1,25 @@
 import axios, { isAxiosError } from 'axios'
 
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+const TOKEN_STORAGE_KEY = 'hrms_access_token'
+export const UNAUTHORIZED_EVENT = 'hrms:unauthorized'
+
+export function getStoredToken(): string | null {
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setStoredToken(token: string | null): void {
+  try {
+    if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token)
+    else window.localStorage.removeItem(TOKEN_STORAGE_KEY)
+  } catch {
+    // Ignore storage errors in restricted environments
+  }
+}
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -10,10 +29,46 @@ export const api = axios.create({
   timeout: 120000,
 })
 
-/** Public URL of an uploaded resume file served by the backend's /files mount. */
-export function getFileUrl(storedFilename: string): string {
-  const origin = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
-  return `${origin}/files/${encodeURIComponent(storedFilename)}`
+api.interceptors.request.use((config) => {
+  const token = getStoredToken()
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (
+      isAxiosError(error) &&
+      error.response?.status === 401 &&
+      !error.config?.url?.includes('/auth/login')
+    ) {
+      setStoredToken(null)
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+    }
+    return Promise.reject(error)
+  },
+)
+
+/** Authenticated API path for streaming a resume file through the storage layer. */
+export function getFileUrl(resumeFileId: string, download = false): string {
+  const query = download ? '?download=true' : ''
+  return `${API_BASE_URL}/resumes/${encodeURIComponent(resumeFileId)}/file${query}`
+}
+
+/** Fetch a resume file via authenticated Axios request and return a Blob. */
+export async function fetchResumeBlob(
+  resumeFileId: string,
+  download = false,
+): Promise<Blob> {
+  const response = await api.get<Blob>(`/resumes/${encodeURIComponent(resumeFileId)}/file`, {
+    params: download ? { download: true } : undefined,
+    responseType: 'blob',
+  })
+  return response.data
 }
 
 interface ValidationIssue {

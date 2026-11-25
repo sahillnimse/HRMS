@@ -7,8 +7,10 @@ import {
   Edit3,
   LayoutDashboard,
   Network,
+  RefreshCw,
   Save,
   Upload,
+  UserPlus,
 } from 'lucide-react'
 import { useCandidates } from '@/hooks/useCandidates'
 import { useAddToast } from '@/components/ui/Toast'
@@ -16,11 +18,17 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Stepper } from '@/components/ui/Stepper'
 import { Tabs } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { CandidateNetworkGraph } from '@/components/CandidateNetworkGraph'
 import { CandidateProfileOverview } from '@/components/CandidateProfileOverview'
 import { EditableReview } from '@/components/EditableReview'
 import { normalizeProfile, toCandidatePayload, validateProfile } from '@/lib/profile'
-import type { CandidateResponse, CandidateUpdate, ParsedResumeData, ResumeUploadResponse } from '@/types'
+import type {
+  CandidateResponse,
+  CandidateUpdate,
+  ParsedResumeData,
+  ResumeUploadResponse,
+} from '@/types'
 
 type ReviewTab = 'dossier' | 'edit'
 
@@ -28,7 +36,7 @@ export default function ReviewPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const addToast = useAddToast()
-  const { createCandidate, loading: saving, error: saveError } = useCandidates()
+  const { createCandidate, updateCandidate, loading: saving, error: saveError } = useCandidates()
 
   const upload = (location.state as { upload?: ResumeUploadResponse } | null)?.upload
 
@@ -37,6 +45,7 @@ export default function ReviewPage() {
   )
   const [tab, setTab] = useState<ReviewTab>('dossier')
   const [savedCandidate, setSavedCandidate] = useState<CandidateResponse | null>(null)
+  const [savedMode, setSavedMode] = useState<'created' | 'updated'>('created')
 
   useEffect(() => {
     if (!upload) {
@@ -46,12 +55,18 @@ export default function ReviewPage() {
 
   if (!upload || !draft) return null
 
-  const commitSave = async (payload: CandidateUpdate) => {
+  const duplicateMatches = upload.duplicate.matches ?? []
+  const hasDuplicates = upload.duplicate.is_duplicate && duplicateMatches.length > 0
+
+  const commitCreate = async (payload: CandidateUpdate, allowDuplicate: boolean) => {
     const result = await createCandidate({
       resume_file_id: upload.resume_file_id,
       ...payload,
+      allow_duplicate: allowDuplicate,
+      is_duplicate_flagged: hasDuplicates,
     })
     if (result) {
+      setSavedMode('created')
       setSavedCandidate(result)
       addToast(`${result.full_name} saved to candidate directory`, 'success')
     } else {
@@ -59,14 +74,36 @@ export default function ReviewPage() {
     }
   }
 
-  const handleQuickSave = async () => {
+  const handleSaveAsNew = async () => {
     const errs = validateProfile(draft)
     if (Object.keys(errs).length > 0) {
       setTab('edit')
       addToast('Please fill in the required fields before saving.', 'error')
       return
     }
-    await commitSave(toCandidatePayload(draft))
+    await commitCreate(toCandidatePayload(draft), hasDuplicates)
+  }
+
+  const handleUpdateExisting = async (existingId: string) => {
+    const errs = validateProfile(draft)
+    if (Object.keys(errs).length > 0) {
+      setTab('edit')
+      addToast('Please fill in the required fields before updating.', 'error')
+      return
+    }
+    const payload = {
+      ...toCandidatePayload(draft),
+      resume_file_id: upload.resume_file_id,
+      is_duplicate_flagged: false,
+    }
+    const result = await updateCandidate(existingId, payload)
+    if (result) {
+      setSavedMode('updated')
+      setSavedCandidate(result)
+      addToast(`Updated existing profile for ${result.full_name}`, 'success')
+    } else {
+      addToast('Failed to update existing candidate.', 'error')
+    }
   }
 
   if (savedCandidate) {
@@ -77,11 +114,15 @@ export default function ReviewPage() {
             <CheckCircle2 size={32} />
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-            Candidate Saved Successfully
+            {savedMode === 'updated'
+              ? 'Existing Candidate Updated'
+              : 'Candidate Saved Successfully'}
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-            <span className="font-semibold text-slate-800">{savedCandidate.full_name}</span> has
-            been added to your talent directory with their structured profile and network graph.
+            <span className="font-semibold text-slate-800">{savedCandidate.full_name}</span>{' '}
+            {savedMode === 'updated'
+              ? 'has been updated with the latest resume and parsed profile.'
+              : 'has been added to your talent directory with their structured profile and network graph.'}
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
             <Button size="lg" onClick={() => navigate(`/candidates/${savedCandidate.id}`)}>
@@ -112,41 +153,91 @@ export default function ReviewPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <Stepper current={2} />
-            <Button onClick={handleQuickSave} loading={saving} className="shadow-glow">
-              <Save size={16} />
-              Save Candidate
+            <Button onClick={handleSaveAsNew} loading={saving} className="shadow-glow">
+              {hasDuplicates ? <UserPlus size={16} /> : <Save size={16} />}
+              {hasDuplicates ? 'Save as New' : 'Save Candidate'}
             </Button>
           </div>
         }
       />
 
-      {/* Duplicate Alert */}
-      {upload.duplicate.is_duplicate && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600" />
-            <div>
-              <p className="text-sm font-semibold text-amber-900">
-                Potential duplicate candidate detected (matched by {upload.duplicate.matched_field})
-              </p>
-              <p className="mt-0.5 text-xs text-amber-800">
-                A candidate with the same {upload.duplicate.matched_field} already exists in the
-                database. Inspect the existing profile or update the contact fields before saving.
-              </p>
+      {/* Multi-Match Duplicate Resolution Panel */}
+      {hasDuplicates && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-5 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600" />
+              <div>
+                <p className="text-sm font-semibold text-amber-950">
+                  {duplicateMatches.length} potential duplicate
+                  {duplicateMatches.length === 1 ? '' : 's'} detected
+                </p>
+                <p className="mt-0.5 text-xs text-amber-800">
+                  Choose <span className="font-semibold">Update Existing</span> to refresh a matched
+                  record with this CV, or <span className="font-semibold">Save as New</span> to
+                  create a separate flagged profile.
+                </p>
+              </div>
             </div>
-          </div>
-          {upload.duplicate.candidate_id && (
-            <Button variant="outline" size="sm" asChild className="shrink-0 bg-white">
-              <Link
-                to={`/candidates/${upload.duplicate.candidate_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                View Existing
-                <ArrowUpRight size={14} />
-              </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveAsNew}
+              loading={saving}
+              className="shrink-0 bg-white"
+            >
+              <UserPlus size={14} />
+              Save as New (Flagged)
             </Button>
-          )}
+          </div>
+
+          <div className="space-y-2">
+            {duplicateMatches.map((match) => (
+              <div
+                key={match.candidate_id}
+                className="flex flex-col gap-3 rounded-xl border border-amber-200/80 bg-white p-3.5 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-900">{match.full_name}</span>
+                    <Badge variant="secondary">{match.primary_domain}</Badge>
+                    {match.matched_fields.map((field) => (
+                      <Badge key={field} variant="warning">
+                        Matched: {field}
+                        {field === 'name' && match.name_similarity != null
+                          ? ` (${Math.round(match.name_similarity * 100)}%)`
+                          : ''}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="truncate text-xs text-slate-500">
+                    {[match.email, match.phone].filter(Boolean).join(' · ') || 'No contact info'}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link
+                      to={`/candidates/${match.candidate_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Inspect
+                      <ArrowUpRight size={13} />
+                    </Link>
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleUpdateExisting(match.candidate_id)}
+                    loading={saving}
+                  >
+                    <RefreshCw size={13} />
+                    Update Existing
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -200,10 +291,10 @@ export default function ReviewPage() {
           duplicate={upload.duplicate}
           resumeFileId={upload.resume_file_id}
           onChange={setDraft}
-          onSave={commitSave}
+          onSave={(payload) => commitCreate(payload, hasDuplicates)}
           onCancel={() => setTab('dossier')}
           saving={saving}
-          submitLabel="Save Candidate"
+          submitLabel={hasDuplicates ? 'Save as New' : 'Save Candidate'}
           cancelLabel="Back to Overview"
         />
       )}

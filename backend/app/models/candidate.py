@@ -1,8 +1,16 @@
-from sqlalchemy import Boolean, ForeignKey, String, Text
+import enum
+from uuid import UUID as PyUUID
+
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+
+class ResumeFileStatus(str, enum.Enum):
+    pending = "pending"
+    attached = "attached"
 
 
 class ResumeFile(Base):
@@ -15,9 +23,15 @@ class ResumeFile(Base):
     file_path: Mapped[str] = mapped_column(String(512), nullable=False)
     file_size: Mapped[int] = mapped_column(nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=ResumeFileStatus.pending.value,
+        server_default=ResumeFileStatus.pending.value,
+        index=True,
+    )
 
-    # Relationship back to candidate (1:1 via backref on Candidate)
-    candidate: Mapped["Candidate"] = relationship(
+    candidate: Mapped["Candidate | None"] = relationship(
         "Candidate",
         back_populates="resume_file",
         uselist=False,
@@ -31,11 +45,20 @@ class Candidate(Base):
     """
 
     __tablename__ = "candidates"
+    __table_args__ = (
+        Index(
+            "ix_candidates_full_name_trgm",
+            "full_name",
+            postgresql_using="gin",
+            postgresql_ops={"full_name": "gin_trgm_ops"},
+        ),
+    )
 
     # --- Contact Details (indexed for search/dedup) ---
     full_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    phone_normalized: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     linkedin_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -61,14 +84,14 @@ class Candidate(Base):
     languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     certifications: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
 
-    # --- Full raw parsed payload from Gemini ---
+    # --- Full raw parsed payload from AI ---
     raw_parsed_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     # --- Duplicate flagging ---
     is_duplicate_flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # --- File storage relationship ---
-    resume_file_id: Mapped[str | None] = mapped_column(
+    resume_file_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("resume_files.id", ondelete="SET NULL"),
         nullable=True,

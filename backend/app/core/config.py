@@ -2,7 +2,8 @@
 Application configuration loaded from environment variables.
 
 Uses pydantic-settings for type-safe, validated settings with sensible
-development defaults. Production values must be supplied via .env.
+development defaults. Production values must be supplied via environment
+variables or .env.
 """
 
 from functools import lru_cache
@@ -14,6 +15,8 @@ from pydantic_settings import BaseSettings
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _BACKEND_DIR.parent
+
+DEFAULT_SECRET_KEY = "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -28,18 +31,38 @@ class Settings(BaseSettings):
     DATABASE_URL_UNPOOLED: Optional[str] = None
     DATABASE_URL_SYNC: str = "postgresql+psycopg2://hrms_user:hrms_pass@localhost:5432/hrms_db"
 
-    # --- Google Gemini ---
+    # --- Google Gemini / OpenRouter ---
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
 
-    # --- File storage (local dev) ---
+    # --- File Storage ---
+    STORAGE_BACKEND: str = "local"  # "local" | "s3" | "r2"
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 10
     ALLOWED_EXTENSIONS: str = ".pdf,.docx"
 
-    # --- Security ---
-    SECRET_KEY: str = "change-me-in-production"
+    # --- S3 / Cloudflare R2 (used when STORAGE_BACKEND is "s3" or "r2") ---
+    S3_ENDPOINT_URL: Optional[str] = None
+    S3_BUCKET: Optional[str] = None
+    S3_REGION: str = "auto"
+    S3_ACCESS_KEY_ID: Optional[str] = None
+    S3_SECRET_ACCESS_KEY: Optional[str] = None
+    S3_PREFIX: str = "resumes"
+
+    # --- Orphan Resume Cleanup ---
+    ORPHAN_MAX_AGE_HOURS: int = 24
+    ORPHAN_CLEANUP_INTERVAL_MINUTES: int = 60
+    ENABLE_CLEANUP_SCHEDULER: bool = True
+
+    # --- Duplicate Detection ---
+    DUPLICATE_NAME_SIMILARITY_THRESHOLD: float = 0.6
+
+    # --- Security & Auth ---
+    SECRET_KEY: str = DEFAULT_SECRET_KEY
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    BOOTSTRAP_ADMIN_EMAIL: Optional[str] = None
+    BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = None
+    BOOTSTRAP_ADMIN_NAME: str = "System Admin"
 
     # CORS origins (accepts JSON array or comma-separated string)
     CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["http://localhost:5173"])
@@ -54,6 +77,16 @@ class Settings(BaseSettings):
                 return json.loads(v)
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
+
+    def validate_production_security(self) -> None:
+        """Fail fast on startup in production if SECRET_KEY is unsafe."""
+        if self.APP_ENV.lower() == "production":
+            key = (self.SECRET_KEY or "").strip()
+            if not key or key == DEFAULT_SECRET_KEY or len(key) < 32:
+                raise RuntimeError(
+                    "Refusing to start in production with default or weak SECRET_KEY "
+                    "(must be a unique random string of at least 32 characters)."
+                )
 
     model_config = {
         "env_file": (str(_BACKEND_DIR / ".env"), str(_REPO_ROOT / ".env.local")),

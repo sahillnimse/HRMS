@@ -1,38 +1,50 @@
 """
-Candidate CRUD endpoints.
+Candidate CRUD endpoints (all authenticated with role-based access control).
 
-GET    /api/v1/candidates            - list with search/filter/pagination
-GET    /api/v1/candidates/{id}       - get single candidate
-POST   /api/v1/candidates            - create (from Review UI)
-PUT    /api/v1/candidates/{id}       - update
-DELETE /api/v1/candidates/{id}       - delete
+GET    /api/v1/candidates            - list with search/filter/pagination (admin|recruiter|viewer)
+GET    /api/v1/candidates/stats      - aggregate metrics (admin|recruiter|viewer)
+GET    /api/v1/candidates/{id}       - get single candidate (admin|recruiter|viewer)
+GET    /api/v1/candidates/{id}/resume - stream candidate's resume file (admin|recruiter|viewer)
+POST   /api/v1/candidates            - create from Review UI (admin|recruiter)
+PUT    /api/v1/candidates/{id}       - update (admin|recruiter)
+DELETE /api/v1/candidates/{id}       - delete (admin|recruiter)
 """
 
+from io import BytesIO
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_role
 from app.crud.candidate import (
     create_candidate,
-    get_candidate_by_id,
-    update_candidate,
-    get_candidates,
-    get_candidate_stats,
     delete_candidate,
-    check_duplicate,
+    find_duplicates,
+    get_candidate_by_id,
+    get_candidate_stats,
+    get_candidates,
+    update_candidate,
 )
-from app.models.candidate import Candidate
+from app.models.candidate import Candidate, ResumeFile
+from app.models.user import User, UserRole
 from app.schemas.candidate import (
     CandidateCreate,
-    CandidateUpdate,
-    CandidateResponse,
     CandidateListItem,
+    CandidateResponse,
     CandidateStats,
+    CandidateUpdate,
 )
+from app.services.file_storage import storage
 
 router = APIRouter()
+
+READ_ROLES = (UserRole.admin, UserRole.recruiter, UserRole.viewer)
+WRITE_ROLES = (UserRole.admin, UserRole.recruiter)
 
 
 def _to_list_item(candidate: Candidate) -> CandidateListItem:
@@ -49,22 +61,33 @@ def _to_list_item(candidate: Candidate) -> CandidateListItem:
 async def create_candidate_endpoint(
     candidate_in: CandidateCreate,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*WRITE_ROLES)),
 ):
     """Save a reviewed candidate to PostgreSQL."""
-    # Re-check duplicate on save to avoid race conditions
-    existing = await check_duplicate(db, email=candidate_in.email, phone=candidate_in.phone)
-    if existing:
+    matches = await find_duplicates(
+        db,
+        email=str(candidate_in.email) if candidate_in.email else None,
+        phone=candidate_in.phone,
+        full_name=candidate_in.full_name,
+    )
+    exact_matches = [m for m in matches if "email" in m.matched_fields or "phone" in m.matched_fields]
+
+    if exact_matches and not candidate_in.allow_duplicate:
+        top = exact_matches[0]
+        fields = ", ".join(top.matched_fields)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Candidate already exists (matched by {'email' if existing.email == candidate_in.email else 'phone'})",
+            detail=f"Candidate already exists (matched {top.full_name} by {fields})",
         )
 
-    return await create_candidate(db, candidate_in)
+    flagged = bool(candidate_in.is_duplicate_flagged or matches)
+    return await create_candidate(db, candidate_in, is_duplicate_flagged=flagged)
 
 
 @router.get("/", response_model=dict)
 async def list_candidates(
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None, description="Search name, email, or domain"),
@@ -94,7 +117,10 @@ async def list_candidates(
 
 
 @router.get("/stats", response_model=CandidateStats)
-async def candidate_stats(db: AsyncSession = Depends(get_db)):
+async def candidate_stats(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
     """Aggregate talent-pool metrics for the dashboard."""
     return await get_candidate_stats(db)
 
@@ -103,12 +129,49 @@ async def candidate_stats(db: AsyncSession = Depends(get_db)):
 async def get_candidate(
     candidate_id: UUID,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
 ):
     """Get a single candidate's full profile."""
-    candidate = await get_candidate_by_id(db, str(candidate_id))
+    candidate = await get_candidate_by_id(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     return candidate
+
+
+@router.get("/{candidate_id}/resume")
+async def stream_candidate_resume(
+    candidate_id: UUID,
+    download: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """Authenticated streaming download/preview of a candidate's attached resume file."""
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if not candidate.resume_file_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate has no attached resume file",
+        )
+
+    res = await db.execute(select(ResumeFile).where(ResumeFile.id == candidate.resume_file_id))
+    rf = res.scalar_one_or_none()
+    if not rf:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume file record not found")
+
+    try:
+        file_bytes = await storage.read_file(rf.stored_filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored resume file is missing")
+
+    safe_name = Path(rf.original_filename).name.replace('"', "")
+    disposition = "attachment" if download else "inline"
+    return StreamingResponse(
+        BytesIO(file_bytes),
+        media_type=rf.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'{disposition}; filename="{safe_name}"'},
+    )
 
 
 @router.put("/{candidate_id}", response_model=CandidateResponse)
@@ -116,9 +179,10 @@ async def update_candidate_endpoint(
     candidate_id: UUID,
     candidate_in: CandidateUpdate,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*WRITE_ROLES)),
 ):
-    """Update an existing candidate (HR edits after save)."""
-    candidate = await get_candidate_by_id(db, str(candidate_id))
+    """Update an existing candidate (HR edits after save or duplicate update)."""
+    candidate = await get_candidate_by_id(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     return await update_candidate(db, candidate, candidate_in)
@@ -128,9 +192,10 @@ async def update_candidate_endpoint(
 async def delete_candidate_endpoint(
     candidate_id: UUID,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*WRITE_ROLES)),
 ):
     """Delete a candidate."""
-    success = await delete_candidate(db, str(candidate_id))
+    success = await delete_candidate(db, candidate_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     return None

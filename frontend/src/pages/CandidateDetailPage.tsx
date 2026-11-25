@@ -9,6 +9,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useCandidates } from '@/hooks/useCandidates'
+import { useAuth } from '@/contexts/AuthContext'
 import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Tabs } from '@/components/ui/Tabs'
@@ -25,6 +26,7 @@ export default function CandidateDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const addToast = useAddToast()
+  const { canWrite } = useAuth()
   const { selected, loading, error, getCandidate, updateCandidate, deleteCandidate } =
     useCandidates()
 
@@ -121,16 +123,23 @@ export default function CandidateDetailPage() {
               <Download size={15} />
               Export JSON
             </Button>
-            {tab !== 'edit' && (
+            {canWrite && tab !== 'edit' && (
               <Button variant="soft" size="sm" onClick={() => setTab('edit')}>
                 <Edit3 size={15} />
                 Edit Profile
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)} className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700">
-              <Trash2 size={15} />
-              Delete
-            </Button>
+            {canWrite && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDelete(true)}
+                className="text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+              >
+                <Trash2 size={15} />
+                Delete
+              </Button>
+            )}
           </>
         }
       />
@@ -138,11 +147,18 @@ export default function CandidateDetailPage() {
       <Tabs
         value={tab}
         onChange={setTab}
-        items={[
-          { value: 'overview', label: 'Profile Overview', icon: LayoutDashboard },
-          { value: 'network', label: 'Network Graph', icon: Network },
-          { value: 'edit', label: 'Edit Details', icon: Edit3 },
-        ]}
+        items={
+          canWrite
+            ? [
+                { value: 'overview', label: 'Profile Overview', icon: LayoutDashboard },
+                { value: 'network', label: 'Network Graph', icon: Network },
+                { value: 'edit', label: 'Edit Details', icon: Edit3 },
+              ]
+            : [
+                { value: 'overview', label: 'Profile Overview', icon: LayoutDashboard },
+                { value: 'network', label: 'Network Graph', icon: Network },
+              ]
+        }
       />
 
       {tab === 'overview' && (

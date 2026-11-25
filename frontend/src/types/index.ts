@@ -1,3 +1,21 @@
+export type UserRole = 'admin' | 'recruiter' | 'viewer'
+
+export interface User {
+  id: string
+  email: string
+  full_name: string
+  role: UserRole
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+  user: User
+}
+
 export interface WorkExperienceItem {
   company: string
   job_title: string
@@ -38,10 +56,21 @@ export interface ParsedResumeData extends CandidateProfileData {
   raw_parsed_data: Record<string, unknown>
 }
 
+export interface DuplicateMatch {
+  candidate_id: string
+  full_name: string
+  email: string | null
+  phone: string | null
+  primary_domain: string
+  matched_fields: string[]
+  name_similarity: number | null
+}
+
 export interface DuplicateInfo {
   is_duplicate: boolean
   candidate_id: string | null
   matched_field: string | null
+  matches: DuplicateMatch[]
 }
 
 export interface ResumeUploadResponse {
@@ -60,6 +89,7 @@ export interface CandidateListItem {
   primary_domain: string
   years_experience: number
   technical_skills: string[]
+  is_duplicate_flagged?: boolean
   created_at: string
   current_title?: string | null
   current_company?: string | null
@@ -67,6 +97,7 @@ export interface CandidateListItem {
 
 export interface CandidateResponse extends ParsedResumeData {
   id: string
+  phone_normalized?: string | null
   resume_file_id: string | null
   is_duplicate_flagged: boolean
   created_at: string
@@ -105,6 +136,7 @@ export interface CandidateStats {
 }
 
 export interface CandidateUpdate {
+  resume_file_id?: string | null
   full_name?: string
   email?: string | null
   phone?: string | null
@@ -124,4 +156,6 @@ export interface CandidateUpdate {
   languages?: string[]
   certifications?: string[]
   raw_parsed_data?: Record<string, unknown>
+  allow_duplicate?: boolean
+  is_duplicate_flagged?: boolean
 }

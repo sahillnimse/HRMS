@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCandidates } from '@/hooks/useCandidates'
+import { useAuth } from '@/contexts/AuthContext'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { CandidateCard } from '@/components/CandidateCard'
 import { CandidateTable } from '@/components/CandidateTable'
@@ -41,6 +42,7 @@ const PRESET_DOMAINS = [
 ]
 
 export default function DashboardPage() {
+  const { canWrite } = useAuth()
   const {
     candidates,
     stats,
@@ -140,12 +142,14 @@ export default function DashboardPage() {
         title="Candidate Dashboard"
         description="Search structured candidate dossiers, inspect career networks, and filter your talent pool by skills, domain, and seniority."
         actions={
-          <Button asChild size="lg" className="shadow-glow">
-            <Link to="/upload">
-              <Upload size={17} />
-              Upload Resume
-            </Link>
-          </Button>
+          canWrite ? (
+            <Button asChild size="lg" className="shadow-glow">
+              <Link to="/upload">
+                <Upload size={17} />
+                Upload Resume
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
 
