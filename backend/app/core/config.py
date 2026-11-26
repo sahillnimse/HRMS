@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIMENSIONS: int = 768
 
+    # --- Candidate Clarity, Brief & Timeline (Phase 4) ---
+    ENABLE_CANDIDATE_BRIEF: bool = True
+    CANDIDATE_BRIEF_TIMEOUT_SECONDS: int = 25
+    TIMELINE_GAP_THRESHOLD_MONTHS: int = 3
+    SHORT_STINT_MAX_MONTHS: int = 12
+    EXPERIENCE_MISMATCH_YEARS_THRESHOLD: float = 1.5
+
     # --- File Storage ---
     STORAGE_BACKEND: str = "local"  # "local" | "s3" | "r2"
     UPLOAD_DIR: str = "./uploads"

@@ -38,6 +38,7 @@ from app.models.candidate import Candidate
 from app.models.pipeline import JobStatus
 from app.models.user import User, UserRole
 from app.schemas.candidate import CandidateResponse
+from app.schemas.clarity import CandidateTimelineResponse
 from app.schemas.matching import JobMatchItem, JobMatchRequest
 from app.schemas.pipeline import (
     ApplicationCreate,
@@ -49,7 +50,11 @@ from app.schemas.pipeline import (
     JobUpdate,
 )
 from app.services.audit import record_audit, redact_ctc_for_role, redact_for_blind_screening
-from app.services.exports import build_shortlist_xlsx
+from app.services.brief import get_or_generate_candidate_brief
+from app.services.exports import build_shortlist_pack_pdf, build_shortlist_xlsx
+from app.services.matching import compute_jd_match
+from app.services.skills import load_skill_alias_map
+from app.services.timeline import build_career_timeline
 
 jobs_router = APIRouter()
 applications_router = APIRouter()
@@ -228,6 +233,148 @@ async def export_job_shortlist_xlsx(
     return StreamingResponse(
         BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@jobs_router.get("/{job_id}/shortlist/export/pdf")
+async def export_job_shortlist_pack_pdf(
+    job_id: UUID,
+    candidate_ids: Optional[str] = Query(
+        None, description="Optional comma-separated candidate UUIDs (defaults to pipeline + top matches)"
+    ),
+    blind: bool = Query(False, description="Hide name, email, phone, photo, and institution"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*READ_ROLES)),
+):
+    """
+    Phase 4.5: Export a Shortlist Pack PDF (strictly one page per candidate: brief,
+    timeline summary, top skills, and JD match explanation). Omits CTC for viewers; audited.
+    """
+    detail = await get_job_detail(db, job_id)
+    if not detail:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    matches = await list_job_matches(db, job_id)
+    match_by_cid = {m.candidate_id: m for m in matches}
+    stage_by_cid = {a.candidate_id: a.stage.value for a in detail.applications}
+
+    ordered_ids: list[UUID] = []
+    if candidate_ids:
+        raw_ids = [s.strip() for s in candidate_ids.split(",") if s.strip()]
+        try:
+            ordered_ids = list(dict.fromkeys(UUID(i) for i in raw_ids))[:25]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid candidate UUID in `candidate_ids`",
+            )
+    else:
+        seen: set[UUID] = set()
+        for a in detail.applications:
+            if a.candidate_id not in seen:
+                seen.add(a.candidate_id)
+                ordered_ids.append(a.candidate_id)
+        for m in matches:
+            if m.candidate_id not in seen:
+                seen.add(m.candidate_id)
+                ordered_ids.append(m.candidate_id)
+        ordered_ids = ordered_ids[:25]
+
+    cands_map: dict[UUID, Candidate] = {}
+    if ordered_ids:
+        cands = (
+            await db.execute(select(Candidate).where(Candidate.id.in_(ordered_ids)))
+        ).scalars().all()
+        cands_map = {c.id: c for c in cands}
+
+    alias_map = await load_skill_alias_map(db)
+    from app.core.config import settings as app_settings
+
+    entries = []
+    for cid in ordered_ids:
+        cand = cands_map.get(cid)
+        if not cand:
+            continue
+        brief = await get_or_generate_candidate_brief(db, cand, force_regenerate=False, blind=blind)
+        roles, gaps, overlaps, stats = build_career_timeline(cand.work_experience or [])
+        timeline = CandidateTimelineResponse(
+            candidate_id=cand.id,
+            gap_threshold_months=app_settings.TIMELINE_GAP_THRESHOLD_MONTHS,
+            roles=roles,
+            gaps=gaps,
+            overlaps=overlaps,
+            tenure_stats=stats,
+            consistency_checks=[],
+        )
+
+        m = match_by_cid.get(cid)
+        if m is not None:
+            match_dict = {
+                "score": m.score,
+                "breakdown": m.breakdown or {},
+                "explanation": m.explanation or "",
+            }
+        else:
+            score_val, bd_val = compute_jd_match(
+                job_title=detail.title,
+                job_description=detail.description,
+                required_skills=detail.required_skills or [],
+                nice_to_have_skills=detail.nice_to_have_skills or [],
+                min_years=detail.min_years,
+                max_years=detail.max_years,
+                candidate_years=cand.years_experience,
+                candidate_summary=cand.profile_summary,
+                candidate_domain=cand.primary_domain,
+                candidate_technical_skills=cand.technical_skills or [],
+                candidate_tools=cand.tools or [],
+                candidate_work_experience=cand.work_experience or [],
+                alias_map=alias_map,
+            )
+            match_dict = {
+                "score": score_val,
+                "breakdown": bd_val,
+                "explanation": bd_val.get("why") or "",
+            }
+
+        entries.append(
+            {
+                "candidate": CandidateResponse.model_validate(cand),
+                "brief": brief,
+                "timeline": timeline,
+                "match": match_dict,
+                "stage": stage_by_cid.get(cid),
+            }
+        )
+
+    pdf_bytes = build_shortlist_pack_pdf(
+        entries,
+        job_title=detail.title,
+        department=detail.department,
+        location=detail.location,
+        role=current_user.role,
+        blind=blind,
+    )
+
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="export",
+        entity="job",
+        entity_id=job_id,
+        metadata={
+            "format": "shortlist_pack_pdf",
+            "count": len(entries),
+            "blind": blind,
+            "role": current_user.role.value,
+        },
+    )
+
+    slug = "-".join(detail.title.lower().split())[:40] or str(job_id)[:8]
+    fname = f"{slug}-blind-shortlist-pack.pdf" if blind else f"{slug}-shortlist-pack.pdf"
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 

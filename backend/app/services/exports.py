@@ -11,7 +11,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import HRFlowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.user import UserRole
 from app.schemas.candidate import CandidateResponse
@@ -354,3 +354,304 @@ def build_shortlist_xlsx(
     out = BytesIO()
     wb.save(out)
     return out.getvalue()
+
+
+def build_shortlist_pack_pdf(
+    entries: List[Dict[str, Any]],
+    *,
+    job_title: str,
+    department: str = "",
+    location: str = "",
+    role: UserRole,
+    blind: bool = False,
+) -> bytes:
+    """
+    Phase 4.5: Shortlist Pack PDF — strictly ONE page per candidate containing:
+      - Candidate header (anonymized in blind mode; CTC omitted unless admin/recruiter)
+      - Candidate Brief (<=5-line summary, strengths, 0-4 worth-verifying items)
+      - Career Timeline Summary (tenure stats, recent roles, gap/overlap summary)
+      - Top Skills & Tools
+      - JD Match Explanation & Skill-Gap view
+    """
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=0.55 * inch,
+        rightMargin=0.55 * inch,
+        topMargin=0.45 * inch,
+        bottomMargin=0.45 * inch,
+        title=f"Shortlist Pack - {job_title}",
+    )
+
+    styles = getSampleStyleSheet()
+    teal = colors.HexColor("#0D8274")
+    slate_900 = colors.HexColor("#0F172A")
+    slate_600 = colors.HexColor("#475569")
+    slate_200 = colors.HexColor("#E2E8F0")
+    teal_tint = colors.HexColor("#EDFAF7")
+    amber_tint = colors.HexColor("#FFFBEB")
+
+    eyebrow_style = ParagraphStyle(
+        "PackEyebrow",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=10,
+        textColor=teal,
+        spaceAfter=2,
+    )
+    title_style = ParagraphStyle(
+        "PackTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=15,
+        leading=18,
+        textColor=slate_900,
+        spaceAfter=2,
+    )
+    sub_style = ParagraphStyle(
+        "PackSub",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=slate_600,
+        spaceAfter=5,
+    )
+    sec_style = ParagraphStyle(
+        "PackSec",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11.5,
+        textColor=teal,
+        spaceBefore=6,
+        spaceAfter=2.5,
+    )
+    body_style = ParagraphStyle(
+        "PackBody",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.2,
+        leading=11,
+        textColor=slate_900,
+    )
+    small_style = ParagraphStyle(
+        "PackSmall",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.8,
+        leading=10,
+        textColor=slate_600,
+    )
+
+    story: list[Any] = []
+    if not entries:
+        story.append(Paragraph(f"SHORTLIST PACK · {_safe_p(job_title, 100)}", eyebrow_style))
+        story.append(Paragraph("No candidates selected for this shortlist pack.", body_style))
+        doc.build(story)
+        return buf.getvalue()
+
+    job_meta = " · ".join(p for p in (job_title, department, location) if p)
+
+    for idx, entry in enumerate(entries):
+        if idx > 0:
+            story.append(PageBreak())
+
+        cand_raw: CandidateResponse = entry["candidate"]
+        cand = redact_ctc_for_role(cand_raw, role)
+        if blind:
+            cand = redact_for_blind_screening(cand)
+
+        brief = entry.get("brief")
+        timeline = entry.get("timeline")
+        match = entry.get("match")
+
+        badge_prefix = "BLIND SHORTLIST PACK" if blind else "SHORTLIST PACK"
+        story.append(
+            Paragraph(
+                f"{badge_prefix} · {_safe_p(job_meta, 110)} · Candidate {idx + 1} of {len(entries)}",
+                eyebrow_style,
+            )
+        )
+        story.append(Paragraph(_safe_p(cand.full_name, 110), title_style))
+
+        meta_parts = [cand.primary_domain, f"{cand.years_experience:.1f} yrs"]
+        if cand.city:
+            meta_parts.append(cand.city)
+        if not blind:
+            if cand.email:
+                meta_parts.append(cand.email)
+            if cand.phone:
+                meta_parts.append(cand.phone)
+        story.append(Paragraph(_safe_p("  |  ".join(meta_parts), 240), sub_style))
+        story.append(HRFlowable(width="100%", thickness=0.8, color=slate_200, spaceAfter=5))
+
+        # Key facts strip (CTC included ONLY for admin/recruiter)
+        facts: list[tuple[str, str]] = [
+            ("Match Score", f"{match['score']:.1f} / 100" if match else "Not scored"),
+            ("Stage", str(entry.get("stage") or "Unassigned").title()),
+            (
+                "Notice",
+                f"{cand.notice_period_days} days" if cand.notice_period_days is not None else "—",
+            ),
+        ]
+        if role in (UserRole.admin, UserRole.recruiter):
+            curr = (
+                f"{cand.ctc_currency or 'INR'} {cand.current_ctc:,.0f}"
+                if cand.current_ctc is not None
+                else "—"
+            )
+            exp = (
+                f"{cand.ctc_currency or 'INR'} {cand.expected_ctc:,.0f}"
+                if cand.expected_ctc is not None
+                else "—"
+            )
+            facts.append(("Current / Expected CTC", f"{curr} / {exp}"))
+
+        col_w = (letter[0] - 1.1 * inch) / len(facts)
+        fact_cells = [
+            [
+                Paragraph(
+                    f'<font color="#64748B" size="6.8"><b>{escape(k.upper())}</b></font><br/>{_safe_p(v, 45)}',
+                    body_style,
+                )
+                for k, v in facts
+            ]
+        ]
+        tbl = Table(fact_cells, colWidths=[col_w] * len(facts))
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), teal_tint),
+                    ("BOX", (0, 0), (-1, -1), 0.5, slate_200),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.5, slate_200),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        story.append(tbl)
+
+        # 1. Candidate Brief
+        story.append(Paragraph("CANDIDATE BRIEF", sec_style))
+        if brief:
+            brief_lines = [ln.strip() for ln in str(brief.summary).splitlines() if ln.strip()][:5]
+            story.append(Paragraph(_safe_p(" ".join(brief_lines), 420), body_style))
+            if brief.strengths:
+                story.append(Spacer(1, 3))
+                for st in list(brief.strengths)[:3]:
+                    story.append(Paragraph(f"• <b>Strength:</b> {_safe_p(st, 150)}", small_style))
+            if brief.verify_items:
+                story.append(Spacer(1, 3))
+                v_lines = [
+                    f"[{v.severity.upper()}] {_safe_p(v.message, 150)}"
+                    for v in list(brief.verify_items)[:3]
+                ]
+                v_tbl = Table(
+                    [
+                        [
+                            Paragraph(
+                                '<b>Worth Verifying (informational only):</b><br/>'
+                                + "<br/>".join(f"• {ln}" for ln in v_lines),
+                                small_style,
+                            )
+                        ]
+                    ],
+                    colWidths=[letter[0] - 1.1 * inch],
+                )
+                v_tbl.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, -1), amber_tint),
+                            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#FDE68A")),
+                            ("TOPPADDING", (0, 0), (-1, -1), 4),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                        ]
+                    )
+                )
+                story.append(v_tbl)
+        else:
+            story.append(Paragraph(_safe_p(cand.profile_summary, 360), body_style))
+
+        # 2. Match Explanation & Skill-Gap
+        if match:
+            bd = match.get("breakdown") or {}
+            story.append(Paragraph("JOB FIT & SKILL-GAP SUMMARY", sec_style))
+            why = bd.get("why") or match.get("explanation") or ""
+            if why:
+                story.append(Paragraph(_safe_p(why, 240), body_style))
+            matched_req = bd.get("matched_required_skills") or []
+            missing_req = bd.get("missing_required_skills") or []
+            adj = bd.get("adjacent_skills") or []
+            gap_bits: list[str] = []
+            if matched_req:
+                gap_bits.append(f"<b>Matched:</b> {_safe_p(', '.join(matched_req[:8]), 130)}")
+            if missing_req:
+                gap_bits.append(f"<b>Missing:</b> {_safe_p(', '.join(missing_req[:6]), 110)}")
+            if adj:
+                adj_txt = ", ".join(
+                    f"{a.get('candidate_skill')} → {a.get('required_skill')}" for a in adj[:3]
+                )
+                gap_bits.append(f"<b>Adjacent:</b> {_safe_p(adj_txt, 120)}")
+            if gap_bits:
+                story.append(Paragraph("  ·  ".join(gap_bits), small_style))
+
+        # 3. Career Timeline Summary
+        story.append(Paragraph("CAREER TIMELINE SUMMARY", sec_style))
+        if timeline:
+            ts = timeline.tenure_stats
+            t_summary = (
+                f"<b>{ts.total_years:.1f} yrs</b> computed across <b>{ts.role_count}</b> roles "
+                f"· Avg tenure: <b>{ts.average_tenure_months:.0f} mos</b> "
+                f"· Jobs (last 5 yrs): <b>{ts.jobs_last_5_years}</b>"
+            )
+            if timeline.gaps:
+                t_summary += f" · Gaps (&gt;{timeline.gap_threshold_months}m): {len(timeline.gaps)}"
+            if timeline.overlaps:
+                t_summary += f" · Overlaps: {len(timeline.overlaps)}"
+            story.append(Paragraph(t_summary, small_style))
+            for r in list(timeline.roles)[:4]:
+                dates = f"{r.start_ym or r.raw_start or '?'} – {r.end_ym or r.raw_end or '?'}"
+                dur = f" ({r.duration_months}m)" if r.duration_months else ""
+                story.append(
+                    Paragraph(
+                        f"• <b>{_safe_p(r.job_title, 70)}</b> at {_safe_p(r.company, 65)} "
+                        f'<font color="#64748B">[{escape(dates)}{dur}]</font>',
+                        small_style,
+                    )
+                )
+
+        # 4. Top Skills & Education (compact)
+        story.append(Paragraph("TOP SKILLS & CREDENTIALS", sec_style))
+        if cand.technical_skills:
+            story.append(
+                Paragraph(
+                    f"<b>Technical:</b> {_safe_p(', '.join(cand.technical_skills[:14]), 220)}",
+                    small_style,
+                )
+            )
+        if cand.tools:
+            story.append(
+                Paragraph(
+                    f"<b>Tools:</b> {_safe_p(', '.join(cand.tools[:10]), 180)}",
+                    small_style,
+                )
+            )
+        if cand.education:
+            edu_bits = []
+            for ed in (cand.education or [])[:2]:
+                if isinstance(ed, dict):
+                    deg = ed.get("degree") or "Degree"
+                    inst = "[Institution Redacted]" if blind else (ed.get("institution") or "")
+                    edu_bits.append(f"{deg} ({inst})" if inst else str(deg))
+            if edu_bits:
+                story.append(Paragraph(f"<b>Education:</b> {_safe_p('; '.join(edu_bits), 180)}", small_style))
+
+    doc.build(story)
+    return buf.getvalue()

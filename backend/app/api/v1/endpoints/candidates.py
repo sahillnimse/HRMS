@@ -54,6 +54,7 @@ from app.schemas.candidate import (
     CandidateStats,
     CandidateUpdate,
 )
+from app.schemas.clarity import CandidateBriefResponse, CandidateTimelineResponse
 from app.schemas.matching import CandidateCompareResponse, CandidateSearchResponse
 from app.schemas.pipeline import (
     ActivityTimelineItem,
@@ -62,8 +63,11 @@ from app.schemas.pipeline import (
     CandidateNoteResponse,
 )
 from app.services.audit import record_audit, redact_ctc_for_role, redact_for_blind_screening
+from app.services.brief import get_or_generate_candidate_brief
+from app.services.consistency import run_consistency_checks
 from app.services.exports import build_candidate_pdf, build_shortlist_xlsx
 from app.services.file_storage import storage
+from app.services.timeline import build_career_timeline
 
 router = APIRouter()
 
@@ -455,6 +459,93 @@ async def stream_candidate_resume(
         BytesIO(file_bytes),
         media_type=rf.content_type or "application/octet-stream",
         headers={"Content-Disposition": f'{disposition}; filename="{safe_name}"'},
+    )
+
+
+@router.get("/{candidate_id}/brief", response_model=CandidateBriefResponse)
+async def get_candidate_brief_endpoint(
+    candidate_id: UUID,
+    blind: bool = Query(False, description="Mask identifying tokens for blind screening"),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """Return cached Candidate Brief, generating lazily if missing or source data changed."""
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    return await get_or_generate_candidate_brief(db, candidate, force_regenerate=False, blind=blind)
+
+
+@router.post("/{candidate_id}/brief/regenerate", response_model=CandidateBriefResponse)
+async def regenerate_candidate_brief_endpoint(
+    candidate_id: UUID,
+    blind: bool = Query(False, description="Mask identifying tokens for blind screening"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*WRITE_ROLES)),
+):
+    """Force-regenerate a candidate's brief (admin/recruiter only)."""
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    brief = await get_or_generate_candidate_brief(db, candidate, force_regenerate=True, blind=blind)
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="brief_regenerate",
+        entity="candidate",
+        entity_id=candidate.id,
+        metadata={"model": brief.model},
+    )
+    return brief
+
+
+@router.get("/{candidate_id}/timeline", response_model=CandidateTimelineResponse)
+async def get_candidate_timeline_endpoint(
+    candidate_id: UUID,
+    gap_months: Optional[int] = Query(
+        None, ge=1, le=36, description="Gap threshold in months (defaults to TIMELINE_GAP_THRESHOLD_MONTHS)"
+    ),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """Return normalized career timeline, gaps, overlaps, tenure stats, and neutral consistency checks."""
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    from app.core.config import settings as app_settings
+
+    effective_gap = gap_months if gap_months is not None else app_settings.TIMELINE_GAP_THRESHOLD_MONTHS
+    roles, gaps, overlaps, stats = build_career_timeline(
+        candidate.work_experience or [],
+        gap_threshold_months=effective_gap,
+    )
+    llm_years = None
+    if isinstance(candidate.raw_parsed_data, dict):
+        raw_llm = candidate.raw_parsed_data.get("_llm_years_experience")
+        if isinstance(raw_llm, (int, float)):
+            llm_years = float(raw_llm)
+
+    checks = run_consistency_checks(
+        roles=roles,
+        gaps=gaps,
+        overlaps=overlaps,
+        tenure_stats=stats,
+        stated_years=float(candidate.years_experience or 0.0),
+        llm_stated_years=llm_years,
+        work_experience=candidate.work_experience or [],
+        profile_summary=candidate.profile_summary or "",
+        technical_skills=candidate.technical_skills or [],
+        tools=candidate.tools or [],
+    )
+    return CandidateTimelineResponse(
+        candidate_id=candidate.id,
+        gap_threshold_months=effective_gap,
+        roles=roles,
+        gaps=gaps,
+        overlaps=overlaps,
+        tenure_stats=stats,
+        consistency_checks=checks,
     )
 
 

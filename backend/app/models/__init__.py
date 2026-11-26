@@ -5,6 +5,7 @@ from app.models.candidate import (
     ResumeFile,
     ResumeFileStatus,
 )
+from app.models.clarity import CandidateBrief
 from app.models.matching import JobMatch, SkillNormalization
 from app.models.pipeline import (
     Application,
@@ -23,6 +24,7 @@ __all__ = [
     "ApplicationStage",
     "AuditLog",
     "Candidate",
+    "CandidateBrief",
     "CandidateNote",
     "Job",
     "JobMatch",

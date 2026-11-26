@@ -39,6 +39,96 @@ _STOPWORDS = frozenset(
     }
 )
 
+# Curated job-relevant skill adjacency clusters (canonical lower -> cluster label)
+_SKILL_CLUSTERS: List[Tuple[str, frozenset[str]]] = [
+    ("Cloud Platform", frozenset({"aws", "gcp", "azure", "google cloud", "cloud"})),
+    ("Container & Orchestration", frozenset({"docker", "kubernetes", "helm", "terraform", "ecs", "podman"})),
+    ("Relational SQL", frozenset({"postgresql", "mysql", "mariadb", "sql server", "oracle", "sqlite", "sql"})),
+    ("NoSQL & Caching", frozenset({"mongodb", "redis", "dynamodb", "cassandra", "elasticsearch"})),
+    ("Python Web Frameworks", frozenset({"fastapi", "django", "flask", "starlette"})),
+    ("JavaScript / Frontend", frozenset({"javascript", "typescript", "react", "next.js", "vue", "angular", "svelte"})),
+    ("Node / JS Backend", frozenset({"node.js", "express", "nestjs", "typescript", "javascript"})),
+    ("ML & Deep Learning", frozenset({"pytorch", "tensorflow", "scikit-learn", "keras", "xgboost", "huggingface", "llm", "machine learning"})),
+    ("Data Engineering", frozenset({"spark", "airflow", "dbt", "snowflake", "bigquery", "kafka", "pandas", "sql"})),
+    ("JVM Backend", frozenset({"java", "kotlin", "spring boot", "scala"})),
+    ("Systems & APIs", frozenset({"go", "rust", "c++", "grpc", "graphql", "rest"})),
+    ("Design & Prototyping", frozenset({"figma", "sketch", "adobe xd", "framer"})),
+    ("CI/CD & DevOps", frozenset({"github actions", "gitlab ci", "jenkins", "ci/cd", "ansible", "terraform"})),
+]
+
+
+def find_adjacent_skills(
+    missing_required: Sequence[str],
+    candidate_skills_norm: Sequence[str],
+) -> List[Dict[str, str]]:
+    """
+    Identify adjacent/transferable skills the candidate has for missing required skills
+    using skill ecosystem clusters (purely job-relevant, deterministic).
+    """
+    if not missing_required or not candidate_skills_norm:
+        return []
+
+    cand_by_low = {s.lower(): s for s in candidate_skills_norm}
+    adjacent: List[Dict[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    for req in missing_required:
+        req_low = req.lower()
+        for cluster_name, members in _SKILL_CLUSTERS:
+            if req_low in members:
+                for cand_low, cand_disp in cand_by_low.items():
+                    if cand_low != req_low and cand_low in members:
+                        key = (req_low, cand_low)
+                        if key not in seen_pairs:
+                            seen_pairs.add(key)
+                            adjacent.append(
+                                {
+                                    "required_skill": req,
+                                    "candidate_skill": cand_disp,
+                                    "relation": cluster_name,
+                                }
+                            )
+                            break  # one best adjacent match per missing required skill/cluster
+    return adjacent[:8]
+
+
+def build_one_sentence_why(
+    *,
+    matched_req: Sequence[str],
+    missing_req: Sequence[str],
+    adjacent: Sequence[Dict[str, str]],
+    candidate_years: float,
+    min_years: Optional[float],
+    max_years: Optional[float],
+) -> str:
+    """Synthesize a crisp, deterministic one-sentence 'why' explanation for a match."""
+    req_total = len(matched_req) + len(missing_req)
+    parts: list[str] = []
+    if req_total > 0:
+        matched_preview = ", ".join(matched_req[:3])
+        if matched_preview:
+            parts.append(f"matches {len(matched_req)}/{req_total} required skills ({matched_preview})")
+        else:
+            parts.append(f"matches 0/{req_total} required skills")
+    if min_years is not None or max_years is not None:
+        if min_years is not None and candidate_years < min_years:
+            parts.append(f"has {candidate_years:.1f} yrs vs {min_years:g}+ yrs target")
+        elif max_years is not None and candidate_years > max_years:
+            parts.append(f"brings senior depth ({candidate_years:.1f} yrs vs {min_years or 0:g}–{max_years:g} yrs target)")
+        else:
+            parts.append(f"fits the experience band at {candidate_years:.1f} yrs")
+    else:
+        parts.append(f"brings {candidate_years:.1f} yrs experience")
+    if adjacent:
+        first_adj = adjacent[0]
+        parts.append(
+            f"with adjacent {first_adj['candidate_skill']} for {first_adj['required_skill']}"
+        )
+    sentence = "; ".join(parts[:2])
+    if len(parts) > 2:
+        sentence = f"{sentence}, {parts[2]}"
+    return sentence[:1].upper() + sentence[1:] + "." if sentence else "Evaluated against job requirements."
+
 
 def _tokenize(text_val: str) -> set[str]:
     return {
@@ -146,11 +236,22 @@ def compute_jd_match(
     )
     total = max(0.0, min(100.0, total))
 
+    adjacent_skills = find_adjacent_skills(missing_req, cand_skills_norm)
+    why_sentence = build_one_sentence_why(
+        matched_req=matched_req,
+        missing_req=missing_req,
+        adjacent=adjacent_skills,
+        candidate_years=float(candidate_years or 0.0),
+        min_years=min_years,
+        max_years=max_years,
+    )
+
     breakdown: Dict[str, Any] = {
         "weights": WEIGHTS,
         "must_have_score": must_have_score,
         "matched_required_skills": matched_req,
         "missing_required_skills": missing_req,
+        "adjacent_skills": adjacent_skills,
         "experience_score": exp_score,
         "candidate_years": float(candidate_years or 0.0),
         "job_min_years": min_years,
@@ -160,6 +261,7 @@ def compute_jd_match(
         "missing_nice_skills": missing_nice,
         "semantic_score": semantic_score,
         "semantic_mode": semantic_mode,
+        "why": why_sentence,
     }
     return total, breakdown
 
