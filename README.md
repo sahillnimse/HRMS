@@ -95,6 +95,16 @@ npm run dev
 - `GET/POST/PATCH /api/v1/email-templates`, `POST /api/v1/emails/preview`, `POST /api/v1/emails/send`, `GET /api/v1/candidates/{id}/emails` — Templated candidate outreach via pluggable `EmailSender` (`console` dev default, `smtp` via env vars); automatic stage-change emails are OFF by default and rejection emails always require explicit manual confirmation.
 - `POST/GET /api/v1/applications/{id}/offers`, `PATCH /api/v1/offers/{id}` — Offer management (`admin`/`recruiter` only, `expected_joining_date` defaulted from `notice_period_days`, auto-synced with `offer`/`hired` pipeline stages).
 
+## Key Phase 6 Endpoints (Hiring Analytics — No Extra Migration)
+
+All analytics metrics are derived directly from `application_events`, `applications`, `jobs`, and `candidates.source` (migration `0006`). Read-only for `admin`, `recruiter`, and `viewer`:
+
+- `GET /api/v1/analytics/funnel?job_id=&start_date=&end_date=` — Stage reach, current stage counts, step-by-step and applied-to-stage conversion rates, and overall hire rate.
+- `GET /api/v1/analytics/time-in-stage?job_id=&start_date=&end_date=` — Average, median, min, and max days spent per active stage from consecutive `ApplicationEvent` transitions.
+- `GET /api/v1/analytics/time-to-hire?job_id=&start_date=&end_date=` — Average, median, min, and max days from application start to `hired`.
+- `GET /api/v1/analytics/sources?job_id=&start_date=&end_date=` — Candidate volume, applications, screened/interviewed counts, hires, and hire rate grouped by `Candidate.source`.
+- `GET /api/v1/analytics/stuck?job_id=&applied_days=&screened_days=&interview_days=&offer_days=&blind=false` — Active applications exceeding per-stage SLA thresholds (blind-mode aware).
+
 ## Deployment Topology (Vercel + Render + Neon + R2)
 
 ```text
