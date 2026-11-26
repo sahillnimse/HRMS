@@ -31,6 +31,12 @@ services:
         value: "true"
       - key: TIMELINE_GAP_THRESHOLD_MONTHS
         value: "3"
+      - key: DEFAULT_TIMEZONE
+        value: Asia/Kolkata
+      - key: CALENDAR_PROVIDER
+        value: ics
+      - key: EMAIL_BACKEND
+        value: console
       - key: STORAGE_BACKEND
         value: r2
       - key: S3_ENDPOINT_URL

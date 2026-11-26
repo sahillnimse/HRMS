@@ -57,6 +57,9 @@ npm run dev
 | `ENABLE_SEMANTIC_SEARCH` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | Feature-flagged pgvector + Gemini semantic search & matching | `true` / `gemini-embedding-001` / `768` |
 | `ENABLE_CANDIDATE_BRIEF` / `CANDIDATE_BRIEF_TIMEOUT_SECONDS` | Feature-flagged AI candidate brief generation (deterministic template fallback when off/unavailable) | `true` / `25` |
 | `TIMELINE_GAP_THRESHOLD_MONTHS` / `SHORT_STINT_MAX_MONTHS` / `EXPERIENCE_MISMATCH_YEARS_THRESHOLD` | Career timeline gap threshold and neutral consistency-check thresholds (informational only) | `3` / `12` / `1.5` |
+| `DEFAULT_TIMEZONE` / `CALENDAR_PROVIDER` | Display timezone (`Asia/Kolkata`) and calendar provider (`ics`; Google/Outlook future extension point) | `Asia/Kolkata` / `ics` |
+| `EMAIL_BACKEND` / `SMTP_*` | Pluggable email sender (`console` dev default, or `smtp` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) | `console` / `587` |
+| `STUCK_APPLIED_DAYS` / `STUCK_SCREENED_DAYS` / `STUCK_INTERVIEW_DAYS` / `STUCK_OFFER_DAYS` | Default per-stage thresholds (days) for stuck-candidate analytics | `7` / `7` / `10` / `7` |
 | `SECRET_KEY` | JWT signing key (must be ≥32 random chars in `production`) | `change-me-in-production` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Short-lived access JWT TTL in minutes | `15` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Rotating `HttpOnly` refresh cookie TTL in days | `7` |
@@ -84,6 +87,13 @@ npm run dev
 - `POST /api/v1/candidates/{id}/brief/regenerate` — Force-regenerate a candidate brief (`admin` / `recruiter`).
 - `GET /api/v1/candidates/{id}/timeline?gap_months=3` — Normalized career timeline, gap & overlap markers, tenure statistics, and informational-only consistency checks.
 - `GET /api/v1/jobs/{id}/shortlist/export/pdf?candidate_ids=...&blind=false` — Multi-page Shortlist Pack PDF (one page per candidate: brief, timeline summary, top skills, JD skill-gap & match explanation; omits CTC for `viewer`; audit-logged).
+
+## Key Phase 5 Endpoints (Interview Workflow)
+
+- `POST/GET /api/v1/applications/{id}/interviews`, `GET/PATCH/DELETE /api/v1/interviews/{id}`, `GET /api/v1/interviews/mine`, `GET /api/v1/interviews/{id}/ics` — Interview scheduling, participant assignment, UTC storage with `Asia/Kolkata` display, and RFC 5545 `.ics` calendar invite download (`CalendarProvider` abstraction with Google/Outlook extension point).
+- `GET/POST/PATCH /api/v1/scorecard-templates`, `GET/POST /api/v1/interviews/{id}/scorecards` — Structured 1–5 competency scorecards with blind-interviewer enforcement (assigned participants cannot see peer scorecards until submitting their own) and viewer aggregate-only visibility.
+- `GET/POST/PATCH /api/v1/email-templates`, `POST /api/v1/emails/preview`, `POST /api/v1/emails/send`, `GET /api/v1/candidates/{id}/emails` — Templated candidate outreach via pluggable `EmailSender` (`console` dev default, `smtp` via env vars); automatic stage-change emails are OFF by default and rejection emails always require explicit manual confirmation.
+- `POST/GET /api/v1/applications/{id}/offers`, `PATCH /api/v1/offers/{id}` — Offer management (`admin`/`recruiter` only, `expected_joining_date` defaulted from `notice_period_days`, auto-synced with `offer`/`hired` pipeline stages).
 
 ## Deployment Topology (Vercel + Render + Neon + R2)
 
