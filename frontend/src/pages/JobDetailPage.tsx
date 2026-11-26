@@ -4,8 +4,11 @@ import {
   AlertTriangle,
   Building2,
   Check,
+  ChevronDown,
+  ChevronUp,
   EyeOff,
   FileSpreadsheet,
+  FileText,
   GitCompareArrows,
   Kanban,
   MapPin,
@@ -61,12 +64,37 @@ export default function JobDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'kanban' | 'matches'>('kanban')
   const [compareIds, setCompareIds] = useState<string[]>([])
+  const [expandedGapId, setExpandedGapId] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [candSearch, setCandSearch] = useState('')
   const [addingId, setAddingId] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [exportingXlsx, setExportingXlsx] = useState(false)
+  const [exportingPack, setExportingPack] = useState(false)
+
+  const handleExportPackPdf = async () => {
+    if (!id || !jobDetail) return
+    try {
+      setExportingPack(true)
+      await downloadBlobFile(
+        `/jobs/${id}/shortlist/export/pdf`,
+        {
+          blind: blindMode,
+          candidate_ids: compareIds.length > 0 ? compareIds.join(',') : undefined,
+        },
+        `${jobDetail.title.toLowerCase().replace(/\s+/g, '-')}-shortlist-pack.pdf`,
+      )
+      addToast(
+        blindMode ? 'Blind Shortlist Pack PDF exported' : 'Shortlist Pack PDF exported',
+        'success',
+      )
+    } catch {
+      addToast('Failed to export Shortlist Pack PDF', 'error')
+    } finally {
+      setExportingPack(false)
+    }
+  }
 
   const handleExportXlsx = async () => {
     if (!id || !jobDetail) return
@@ -282,6 +310,10 @@ export default function JobDetailPage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" loading={exportingPack} onClick={() => void handleExportPackPdf()}>
+              <FileText size={15} />
+              {compareIds.length > 0 ? `Pack PDF (${compareIds.length})` : 'Shortlist Pack PDF'}
+            </Button>
             <Button variant="outline" size="sm" loading={exportingXlsx} onClick={() => void handleExportXlsx()}>
               <FileSpreadsheet size={15} />
               Export XLSX
@@ -564,28 +596,130 @@ export default function JobDetailPage() {
                             )}
                           </div>
 
-                          {m.explanation && (
-                            <p className="text-xs leading-5 text-slate-600">{m.explanation}</p>
+                          {(m.breakdown?.why || m.explanation) && (
+                            <p className="text-xs leading-5 text-slate-600">
+                              {m.breakdown?.why || m.explanation}
+                            </p>
                           )}
 
-                          {m.breakdown?.matched_required_skills?.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-0.5">
-                              {m.breakdown.matched_required_skills.slice(0, 6).map((sk) => (
-                                <span
-                                  key={`mreq-${m.id}-${sk}`}
-                                  className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700"
-                                >
-                                  {sk}
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            {(m.breakdown?.matched_required_skills ?? []).slice(0, 5).map((sk) => (
+                              <span
+                                key={`mreq-${m.id}-${sk}`}
+                                className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700"
+                              >
+                                {sk}
+                              </span>
+                            ))}
+                            {(m.breakdown?.missing_required_skills ?? []).slice(0, 3).map((sk) => (
+                              <span
+                                key={`mmis-${m.id}-${sk}`}
+                                className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 line-through decoration-rose-400"
+                              >
+                                {sk}
+                              </span>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedGapId((prev) => (prev === m.id ? null : m.id))
+                              }
+                              aria-expanded={expandedGapId === m.id}
+                              className="inline-flex items-center gap-1 rounded-md border border-stone-200 bg-stone-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                            >
+                              Skill-gap view
+                              {expandedGapId === m.id ? (
+                                <ChevronUp size={12} />
+                              ) : (
+                                <ChevronDown size={12} />
+                              )}
+                            </button>
+                          </div>
+
+                          {expandedGapId === m.id && (
+                            <div className="mt-3 rounded-xl border border-stone-200/80 bg-stone-50/70 p-3.5 text-xs space-y-2.5 animate-fade-in">
+                              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                                <div>
+                                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                                    Matched Required ({m.breakdown?.matched_required_skills?.length ?? 0})
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {(m.breakdown?.matched_required_skills ?? []).length > 0 ? (
+                                      m.breakdown.matched_required_skills.map((sk) => (
+                                        <span
+                                          key={`gmr-${m.id}-${sk}`}
+                                          className="rounded bg-emerald-100/80 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800"
+                                        >
+                                          {sk}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="text-slate-400">None</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-rose-700">
+                                    Missing Required ({m.breakdown?.missing_required_skills?.length ?? 0})
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {(m.breakdown?.missing_required_skills ?? []).length > 0 ? (
+                                      m.breakdown.missing_required_skills.map((sk) => (
+                                        <span
+                                          key={`gmis-${m.id}-${sk}`}
+                                          className="rounded bg-rose-100/80 px-1.5 py-0.5 text-[11px] font-medium text-rose-800"
+                                        >
+                                          {sk}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="text-emerald-700 font-medium">All covered</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-sky-700">
+                                    Adjacent / Transferable ({m.breakdown?.adjacent_skills?.length ?? 0})
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {(m.breakdown?.adjacent_skills ?? []).length > 0 ? (
+                                      (m.breakdown.adjacent_skills ?? []).map((adj, aIdx) => (
+                                        <span
+                                          key={`gadj-${m.id}-${aIdx}`}
+                                          title={adj.relation}
+                                          className="rounded bg-sky-100/80 px-1.5 py-0.5 text-[11px] font-medium text-sky-800"
+                                        >
+                                          {adj.candidate_skill} → {adj.required_skill}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="text-slate-400">None detected</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-200/70 pt-2 text-[11px] text-slate-600">
+                                <span>
+                                  Experience fit:{' '}
+                                  <span className="font-semibold text-slate-800">
+                                    {m.breakdown?.candidate_years ?? 0} yrs
+                                  </span>{' '}
+                                  {m.breakdown?.job_min_years != null ||
+                                  m.breakdown?.job_max_years != null
+                                    ? `(target ${m.breakdown?.job_min_years ?? 0}–${m.breakdown?.job_max_years ?? '15+'} yrs · ${Math.round(m.breakdown?.experience_score ?? 0)}%)`
+                                    : `(${Math.round(m.breakdown?.experience_score ?? 0)}%)`}
                                 </span>
-                              ))}
-                              {(m.breakdown.missing_required_skills ?? []).slice(0, 4).map((sk) => (
-                                <span
-                                  key={`mmis-${m.id}-${sk}`}
-                                  className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 line-through decoration-rose-400"
-                                >
-                                  {sk}
+                                <span>
+                                  Semantic fit:{' '}
+                                  <span className="font-semibold text-slate-800">
+                                    {Math.round(m.breakdown?.semantic_score ?? 0)}%
+                                  </span>{' '}
+                                  ({m.breakdown?.semantic_mode === 'embedding' ? 'vector' : 'lexical'})
                                 </span>
-                              ))}
+                              </div>
                             </div>
                           )}
                         </div>

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Briefcase,
+  Clock,
   Download,
   Edit3,
   FileText,
@@ -24,6 +25,8 @@ import { Tabs } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { CandidateBriefCard } from '@/components/CandidateBriefCard'
+import { CareerTimeline } from '@/components/CareerTimeline'
 import { CandidateProfileOverview } from '@/components/CandidateProfileOverview'
 import { CandidateNetworkGraph } from '@/components/CandidateNetworkGraph'
 import { CandidateNotesAndActivity } from '@/components/CandidateNotesAndActivity'
@@ -31,7 +34,7 @@ import { EditableReview } from '@/components/EditableReview'
 import { ResumePreview } from '@/components/ResumePreview'
 import type { ApplicationItem, CandidateResponse, CandidateUpdate } from '@/types'
 
-type DetailTab = 'overview' | 'network' | 'activity' | 'resume' | 'edit'
+type DetailTab = 'overview' | 'timeline' | 'network' | 'activity' | 'resume' | 'edit'
 
 export default function CandidateDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -258,11 +261,15 @@ export default function CandidateDetailPage() {
         }
       />
 
+      {/* Phase 4.1: Concise Candidate Brief at top of profile */}
+      <CandidateBriefCard candidateId={selected.id} refreshKey={activityRefresh} />
+
       <Tabs
         value={tab}
         onChange={setTab}
         items={[
           { value: 'overview', label: 'Profile Overview', icon: LayoutDashboard },
+          { value: 'timeline', label: 'Career Timeline', icon: Clock },
           { value: 'network', label: 'Network Graph', icon: Network },
           { value: 'activity', label: 'Notes & Activity', icon: MessageSquare },
           ...(!blindMode && selected.resume_file_id
@@ -283,6 +290,8 @@ export default function CandidateDetailPage() {
           showGraph
         />
       )}
+
+      {tab === 'timeline' && <CareerTimeline candidateId={selected.id} />}
 
       {tab === 'network' && (
         <CandidateNetworkGraph

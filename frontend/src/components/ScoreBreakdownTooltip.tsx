@@ -90,7 +90,9 @@ export function ScoreBreakdownTooltip({
 
   const matchedReq = breakdown?.matched_required_skills ?? []
   const missingReq = breakdown?.missing_required_skills ?? []
+  const adjacentSkills = breakdown?.adjacent_skills ?? []
   const matchedNice = breakdown?.matched_nice_skills ?? []
+  const whyText = breakdown?.why
 
   return (
     <div
@@ -128,6 +130,12 @@ export function ScoreBreakdownTooltip({
               {score.toFixed(1)}
             </span>
           </div>
+
+          {whyText && (
+            <p className="mt-2.5 rounded-lg bg-brand-50/70 px-2.5 py-2 text-[11px] leading-4 text-slate-700">
+              {whyText}
+            </p>
+          )}
 
           <div className="mt-3 space-y-2.5">
             {rows.map((r) => (
@@ -184,6 +192,25 @@ export function ScoreBreakdownTooltip({
                       >
                         <X size={10} />
                         {sk}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {adjacentSkills.length > 0 && (
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-sky-700">
+                    Adjacent / Transferable ({adjacentSkills.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {adjacentSkills.slice(0, 4).map((adj, idx) => (
+                      <span
+                        key={`adj-${idx}-${adj.required_skill}`}
+                        title={adj.relation}
+                        className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-800"
+                      >
+                        {adj.candidate_skill} → {adj.required_skill}
                       </span>
                     ))}
                   </div>

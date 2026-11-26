@@ -348,6 +348,12 @@ export interface CandidateSearchResponse {
   normalized_skills_filter: string[]
 }
 
+export interface AdjacentSkill {
+  required_skill: string
+  candidate_skill: string
+  relation: string
+}
+
 export interface JobMatchBreakdown {
   weights: {
     must_have: number
@@ -358,6 +364,7 @@ export interface JobMatchBreakdown {
   must_have_score: number
   matched_required_skills: string[]
   missing_required_skills: string[]
+  adjacent_skills?: AdjacentSkill[]
   experience_score: number
   candidate_years: number
   job_min_years: number | null
@@ -367,6 +374,74 @@ export interface JobMatchBreakdown {
   missing_nice_skills: string[]
   semantic_score: number
   semantic_mode: 'embedding' | 'lexical_fallback' | string
+  why?: string
+}
+
+export interface ConsistencyCheckItem {
+  code: string
+  severity: 'info' | 'check'
+  message: string
+  evidence: Record<string, unknown>
+}
+
+export interface CandidateBrief {
+  candidate_id: string
+  summary: string
+  strengths: string[]
+  verify_items: ConsistencyCheckItem[]
+  model: string
+  source_hash: string
+  generated_at: string
+  cached: boolean
+}
+
+export interface TimelineRole {
+  index: number
+  company: string
+  job_title: string
+  raw_start: string | null
+  raw_end: string | null
+  start_ym: string | null
+  end_ym: string | null
+  start_month_index: number | null
+  end_month_index: number | null
+  duration_months: number | null
+  is_current: boolean
+  has_invalid_dates: boolean
+}
+
+export interface TimelineGap {
+  from_ym: string
+  to_ym: string
+  duration_months: number
+  between_roles: string[]
+}
+
+export interface TimelineOverlap {
+  from_ym: string
+  to_ym: string
+  overlap_months: number
+  roles: string[]
+}
+
+export interface TenureStats {
+  total_years: number
+  total_months: number
+  role_count: number
+  dated_role_count: number
+  average_tenure_months: number
+  jobs_last_5_years: number
+  short_stints_count: number
+}
+
+export interface CandidateTimeline {
+  candidate_id: string
+  gap_threshold_months: number
+  roles: TimelineRole[]
+  gaps: TimelineGap[]
+  overlaps: TimelineOverlap[]
+  tenure_stats: TenureStats
+  consistency_checks: ConsistencyCheckItem[]
 }
 
 export interface JobMatchCandidateSummary {
