@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    analytics,
     audit,
     auth,
     candidates,
@@ -38,3 +39,4 @@ api_router.include_router(offers.router, prefix="/offers", tags=["offers"])
 api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["audit-logs"])
 api_router.include_router(privacy.router, prefix="/privacy", tags=["privacy"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
