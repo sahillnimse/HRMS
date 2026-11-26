@@ -12,7 +12,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, Clock, EyeOff, GripVertical, Trash2 } from 'lucide-react'
+import { ArrowUpRight, Clock, EyeOff, GripVertical, Star, Trash2 } from 'lucide-react'
 import type { ApplicationItem, ApplicationStage } from '@/types'
 import { blindCandidateLabel, useBlindMode } from '@/contexts/BlindModeContext'
 import { Avatar } from '@/components/ui/Avatar'
@@ -164,6 +164,13 @@ function CardBody({
         <p className="mt-2 rounded-lg bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
           Reason: {app.rejection_reason}
         </p>
+      )}
+
+      {(app.scorecard_count ?? 0) > 0 && (
+        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">
+          <Star size={10} className="fill-brand-500 text-brand-500" />
+          {app.scorecard_average ?? '—'}/5 ({app.scorecard_count})
+        </div>
       )}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2">

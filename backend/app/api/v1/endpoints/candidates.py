@@ -45,6 +45,8 @@ from app.crud.pipeline import (
     list_candidate_applications,
     list_candidate_notes,
 )
+from app.crud.workflow import get_candidate_scorecard_summary, list_candidate_emails
+from app.schemas.workflow import EmailLogResponse, ScorecardAggregate
 from app.models.candidate import Candidate, ResumeFile
 from app.models.user import User, UserRole
 from app.schemas.candidate import (
@@ -559,6 +561,30 @@ async def get_candidate_applications(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     return await list_candidate_applications(db, candidate_id)
+
+
+@router.get("/{candidate_id}/scorecard-summary", response_model=ScorecardAggregate)
+async def get_candidate_scorecard_summary_endpoint(
+    candidate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    return await get_candidate_scorecard_summary(db, candidate_id)
+
+
+@router.get("/{candidate_id}/emails", response_model=List[EmailLogResponse])
+async def get_candidate_emails_endpoint(
+    candidate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    return await list_candidate_emails(db, candidate_id)
 
 
 @router.get("/{candidate_id}/notes", response_model=List[CandidateNoteResponse])

@@ -34,6 +34,12 @@ from app.crud.pipeline import (
     move_application_stage,
     update_job,
 )
+from app.crud.workflow import (
+    create_interview,
+    create_offer,
+    list_application_interviews,
+    list_application_offers,
+)
 from app.models.candidate import Candidate
 from app.models.pipeline import JobStatus
 from app.models.user import User, UserRole
@@ -48,6 +54,12 @@ from app.schemas.pipeline import (
     JobDetailResponse,
     JobResponse,
     JobUpdate,
+)
+from app.schemas.workflow import (
+    InterviewCreate,
+    InterviewResponse,
+    OfferCreate,
+    OfferResponse,
 )
 from app.services.audit import record_audit, redact_ctc_for_role, redact_for_blind_screening
 from app.services.brief import get_or_generate_candidate_brief
@@ -439,3 +451,57 @@ async def delete_application_endpoint(
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
     return None
+
+
+@applications_router.post(
+    "/{application_id}/interviews",
+    response_model=InterviewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_application_interview_endpoint(
+    application_id: UUID,
+    payload: InterviewCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*WRITE_ROLES)),
+):
+    created = await create_interview(db, application_id, payload, actor_id=current_user.id)
+    if not created:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    return created
+
+
+@applications_router.get("/{application_id}/interviews", response_model=List[InterviewResponse])
+async def list_application_interviews_endpoint(
+    application_id: UUID,
+    blind: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    return await list_application_interviews(db, application_id, blind=blind)
+
+
+@applications_router.post(
+    "/{application_id}/offers",
+    response_model=OfferResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_application_offer_endpoint(
+    application_id: UUID,
+    payload: OfferCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*WRITE_ROLES)),
+):
+    created = await create_offer(db, application_id, payload, actor_id=current_user.id)
+    if not created:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    return created
+
+
+@applications_router.get("/{application_id}/offers", response_model=List[OfferResponse])
+async def list_application_offers_endpoint(
+    application_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*WRITE_ROLES)),
+):
+    """Admin/recruiter only: offers contain CTC details."""
+    return await list_application_offers(db, application_id)

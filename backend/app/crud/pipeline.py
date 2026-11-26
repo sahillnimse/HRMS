@@ -143,10 +143,14 @@ async def get_job_detail(db: AsyncSession, job_id: UUID) -> Optional[JobDetailRe
     if not job:
         return None
 
+    from app.crud.workflow import get_application_scorecard_aggregates
+
+    agg_map = await get_application_scorecard_aggregates(db, [a.id for a in job.applications])
     stage_counts: Dict[str, int] = {}
     app_items: List[ApplicationResponse] = []
     for app in sorted(job.applications, key=lambda a: a.stage_changed_at, reverse=True):
         stage_counts[app.stage.value] = stage_counts.get(app.stage.value, 0) + 1
+        agg = agg_map.get(app.id)
         app_items.append(
             ApplicationResponse(
                 id=app.id,
@@ -165,6 +169,9 @@ async def get_job_detail(db: AsyncSession, job_id: UUID) -> Optional[JobDetailRe
                 job_title=job.title,
                 job_department=job.department,
                 job_status=job.status,
+                scorecard_count=agg.count if agg else 0,
+                scorecard_average=agg.average_rating if agg else None,
+                scorecard_recommendations=agg.recommendations if agg else {},
             )
         )
 
@@ -422,7 +429,10 @@ async def list_candidate_applications(
         .where(Application.candidate_id == candidate_id)
         .order_by(Application.stage_changed_at.desc())
     )
+    from app.crud.workflow import get_application_scorecard_aggregates
+
     apps = res.scalars().all()
+    agg_map = await get_application_scorecard_aggregates(db, [a.id for a in apps])
     return [
         ApplicationResponse(
             id=a.id,
@@ -436,6 +446,9 @@ async def list_candidate_applications(
             job_title=a.job.title if a.job else None,
             job_department=a.job.department if a.job else None,
             job_status=a.job.status if a.job else None,
+            scorecard_count=agg_map[a.id].count if a.id in agg_map else 0,
+            scorecard_average=agg_map[a.id].average_rating if a.id in agg_map else None,
+            scorecard_recommendations=agg_map[a.id].recommendations if a.id in agg_map else {},
         )
         for a in apps
     ]
@@ -658,7 +671,35 @@ async def get_candidate_activity(
             )
         )
 
-    # 3. Direct candidate audit entries (view, edit, export)
+    # 3. Sent / failed candidate emails (Phase 5.3)
+    from app.models.workflow import EmailLog
+
+    email_res = await db.execute(
+        select(EmailLog)
+        .options(selectinload(EmailLog.actor))
+        .where(EmailLog.candidate_id == candidate_id)
+        .order_by(EmailLog.created_at.desc())
+        .limit(limit)
+    )
+    for em in email_res.scalars().all():
+        items.append(
+            ActivityTimelineItem(
+                id=f"email-{em.id}",
+                kind="email",
+                action="email_sent",
+                summary=f"Email ({em.status}): {em.subject}",
+                actor_name=(em.actor.full_name or em.actor.email) if em.actor else None,
+                actor_email=em.actor.email if em.actor else None,
+                metadata={
+                    "template_key": em.template_key,
+                    "status": em.status,
+                    "subject": em.subject,
+                },
+                timestamp=em.created_at,
+            )
+        )
+
+    # 4. Direct candidate audit entries (view, edit, export)
     cid_str = str(candidate_id)
     aud_res = await db.execute(
         select(AuditLog)
@@ -668,12 +709,15 @@ async def get_candidate_activity(
         .limit(limit)
     )
     for a in aud_res.scalars().all():
+        if a.action == "email_sent":
+            continue  # Already shown as a dedicated `email` timeline entry above
         label_map = {
             "view": "Viewed candidate profile",
             "edit": "Updated candidate profile",
             "export": "Exported candidate profile or CV",
             "delete": "Deleted candidate profile",
             "create": "Created candidate profile",
+            "brief_regenerate": "Regenerated candidate brief",
         }
         items.append(
             ActivityTimelineItem(

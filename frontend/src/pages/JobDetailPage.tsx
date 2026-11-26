@@ -27,6 +27,7 @@ import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { KanbanBoard } from '@/components/KanbanBoard'
 import { ScoreBreakdownTooltip } from '@/components/ScoreBreakdownTooltip'
+import { ScheduleInterviewModal } from '@/components/ScheduleInterviewModal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Select } from '@/components/ui/Select'
@@ -72,6 +73,10 @@ export default function JobDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [exportingXlsx, setExportingXlsx] = useState(false)
   const [exportingPack, setExportingPack] = useState(false)
+  const [schedulePromptApp, setSchedulePromptApp] = useState<{
+    applicationId: string
+    candidateLabel: string
+  } | null>(null)
 
   const handleExportPackPdf = async () => {
     if (!id || !jobDetail) return
@@ -194,6 +199,14 @@ export default function JobDetailPage() {
       ),
     )
     addToast(`Moved to ${toStage}`, 'success')
+    if (toStage === 'interview') {
+      setSchedulePromptApp({
+        applicationId: updated.id,
+        candidateLabel: blindMode
+          ? blindCandidateLabel(updated.candidate_id)
+          : updated.candidate?.full_name || 'Candidate',
+      })
+    }
   }
 
   const handleAddCandidate = async (candidateId: string) => {
@@ -842,6 +855,16 @@ export default function JobDetailPage() {
         onConfirm={handleDeleteJob}
         onCancel={() => setConfirmDelete(false)}
       />
+
+      {schedulePromptApp && (
+        <ScheduleInterviewModal
+          open
+          applicationId={schedulePromptApp.applicationId}
+          candidateLabel={schedulePromptApp.candidateLabel}
+          jobTitle={jobDetail.title}
+          onClose={() => setSchedulePromptApp(null)}
+        />
+      )}
     </div>
   )
 }

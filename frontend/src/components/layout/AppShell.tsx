@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Brain,
   Briefcase,
+  Calendar,
   ChevronLeft,
   Eye,
   EyeOff,
@@ -50,6 +51,12 @@ const NAV: NavEntry[] = [
     label: 'Jobs',
     icon: Briefcase,
     match: (p) => p.startsWith('/jobs'),
+  },
+  {
+    to: '/interviews',
+    label: 'Interviews',
+    icon: Calendar,
+    match: (p) => p.startsWith('/interviews'),
   },
   {
     to: '/upload',

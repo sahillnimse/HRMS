@@ -14,6 +14,7 @@ import ReviewPage from '@/pages/ReviewPage'
 import CandidateDetailPage from '@/pages/CandidateDetailPage'
 import CompareCandidatesPage from '@/pages/CompareCandidatesPage'
 import PrivacyPage from '@/pages/PrivacyPage'
+import InterviewsPage from '@/pages/InterviewsPage'
 
 function App() {
   return (
@@ -99,6 +100,16 @@ function App() {
                   <ProtectedRoute>
                     <AppShell>
                       <CompareCandidatesPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/interviews"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <InterviewsPage />
                     </AppShell>
                   </ProtectedRoute>
                 }

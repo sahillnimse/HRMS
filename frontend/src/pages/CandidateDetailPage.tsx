@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Briefcase,
+  Calendar,
   Clock,
   Download,
   Edit3,
@@ -27,6 +28,7 @@ import { Badge } from '@/components/ui/Badge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CandidateBriefCard } from '@/components/CandidateBriefCard'
 import { CareerTimeline } from '@/components/CareerTimeline'
+import { CandidateWorkflowPanel } from '@/components/CandidateWorkflowPanel'
 import { CandidateProfileOverview } from '@/components/CandidateProfileOverview'
 import { CandidateNetworkGraph } from '@/components/CandidateNetworkGraph'
 import { CandidateNotesAndActivity } from '@/components/CandidateNotesAndActivity'
@@ -34,7 +36,7 @@ import { EditableReview } from '@/components/EditableReview'
 import { ResumePreview } from '@/components/ResumePreview'
 import type { ApplicationItem, CandidateResponse, CandidateUpdate } from '@/types'
 
-type DetailTab = 'overview' | 'timeline' | 'network' | 'activity' | 'resume' | 'edit'
+type DetailTab = 'overview' | 'timeline' | 'workflow' | 'network' | 'activity' | 'resume' | 'edit'
 
 export default function CandidateDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -270,6 +272,7 @@ export default function CandidateDetailPage() {
         items={[
           { value: 'overview', label: 'Profile Overview', icon: LayoutDashboard },
           { value: 'timeline', label: 'Career Timeline', icon: Clock },
+          { value: 'workflow', label: 'Interviews & Offers', icon: Calendar },
           { value: 'network', label: 'Network Graph', icon: Network },
           { value: 'activity', label: 'Notes & Activity', icon: MessageSquare },
           ...(!blindMode && selected.resume_file_id
@@ -292,6 +295,16 @@ export default function CandidateDetailPage() {
       )}
 
       {tab === 'timeline' && <CareerTimeline candidateId={selected.id} />}
+
+      {tab === 'workflow' && (
+        <CandidateWorkflowPanel
+          candidateId={selected.id}
+          candidateName={selected.full_name}
+          candidateEmail={selected.email}
+          noticePeriodDays={selected.notice_period_days}
+          onActivityChange={() => setActivityRefresh((n) => n + 1)}
+        />
+      )}
 
       {tab === 'network' && (
         <CandidateNetworkGraph

@@ -292,6 +292,9 @@ export interface ApplicationItem {
   job_title?: string | null
   job_department?: string | null
   job_status?: JobStatus | null
+  scorecard_count?: number
+  scorecard_average?: number | null
+  scorecard_recommendations?: Record<string, number>
 }
 
 export interface JobDetail extends JobItem {
@@ -442,6 +445,128 @@ export interface CandidateTimeline {
   overlaps: TimelineOverlap[]
   tenure_stats: TenureStats
   consistency_checks: ConsistencyCheckItem[]
+}
+
+export interface InterviewParticipant {
+  user_id: string
+  full_name: string
+  email: string
+  role: string
+}
+
+export interface ScorecardAggregate {
+  count: number
+  average_rating: number | null
+  scale: number
+  recommendations: Record<string, number>
+}
+
+export interface InterviewItem {
+  id: string
+  application_id: string
+  candidate_id: string | null
+  candidate_name: string | null
+  job_id: string | null
+  job_title: string | null
+  round_name: string
+  scheduled_at: string
+  duration_minutes: number
+  mode: 'video' | 'phone' | 'onsite' | string
+  location_or_link: string
+  status: 'scheduled' | 'completed' | 'cancelled' | 'no_show' | string
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  participants: InterviewParticipant[]
+  scorecard_aggregate: ScorecardAggregate
+}
+
+export interface ScorecardCompetency {
+  name: string
+  description: string
+  weight: number
+}
+
+export interface ScorecardTemplate {
+  id: string
+  name: string
+  competencies: ScorecardCompetency[]
+  scale: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ScorecardItem {
+  id: string
+  interview_id: string
+  interviewer_id: string
+  interviewer_name: string | null
+  interviewer_email: string | null
+  template_id: string | null
+  ratings: Record<string, number>
+  average_rating: number | null
+  recommendation: 'strong_no' | 'no' | 'yes' | 'strong_yes' | string
+  comments: string
+  submitted_at: string
+}
+
+export interface InterviewScorecards {
+  interview_id: string
+  aggregate: ScorecardAggregate
+  scorecards: ScorecardItem[]
+  peer_scorecards_locked: boolean
+  viewer_aggregate_only: boolean
+  my_submitted: boolean
+}
+
+export interface EmailTemplate {
+  id: string
+  key: string
+  subject: string
+  body: string
+  stage_trigger: string | null
+  auto_send: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface EmailPreview {
+  to: string | null
+  subject: string
+  body: string
+  template_key: string | null
+}
+
+export interface EmailLogItem {
+  id: string
+  candidate_id: string
+  application_id: string | null
+  template_key: string | null
+  to: string
+  subject: string
+  status: 'queued' | 'sent' | 'failed' | string
+  error: string | null
+  created_by: string | null
+  actor_name: string | null
+  created_at: string
+}
+
+export interface OfferItem {
+  id: string
+  application_id: string
+  candidate_id: string | null
+  candidate_name: string | null
+  job_id: string | null
+  job_title: string | null
+  offered_ctc: number
+  currency: string
+  status: 'draft' | 'extended' | 'accepted' | 'declined' | 'withdrawn' | string
+  expected_joining_date: string | null
+  decline_reason: string | null
+  notes: string
+  created_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface JobMatchCandidateSummary {

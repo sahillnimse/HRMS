@@ -112,6 +112,9 @@ class ApplicationResponse(BaseModel):
     job_title: Optional[str] = None
     job_department: Optional[str] = None
     job_status: Optional[JobStatus] = None
+    scorecard_count: int = 0
+    scorecard_average: Optional[float] = None
+    scorecard_recommendations: Dict[str, int] = Field(default_factory=dict)
 
     model_config = ConfigDict(from_attributes=True)
 
