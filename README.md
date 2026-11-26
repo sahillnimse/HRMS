@@ -55,6 +55,8 @@ npm run dev
 | `DATABASE_URL_UNPOOLED` | Direct Postgres URL used by Alembic migrations | — |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Google Gemini (or OpenRouter `sk-or-`) key & model | `gemini-2.0-flash` |
 | `ENABLE_SEMANTIC_SEARCH` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | Feature-flagged pgvector + Gemini semantic search & matching | `true` / `gemini-embedding-001` / `768` |
+| `ENABLE_CANDIDATE_BRIEF` / `CANDIDATE_BRIEF_TIMEOUT_SECONDS` | Feature-flagged AI candidate brief generation (deterministic template fallback when off/unavailable) | `true` / `25` |
+| `TIMELINE_GAP_THRESHOLD_MONTHS` / `SHORT_STINT_MAX_MONTHS` / `EXPERIENCE_MISMATCH_YEARS_THRESHOLD` | Career timeline gap threshold and neutral consistency-check thresholds (informational only) | `3` / `12` / `1.5` |
 | `SECRET_KEY` | JWT signing key (must be ≥32 random chars in `production`) | `change-me-in-production` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Short-lived access JWT TTL in minutes | `15` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Rotating `HttpOnly` refresh cookie TTL in days | `7` |
@@ -72,9 +74,16 @@ npm run dev
 
 ## Roles & Permissions
 
-- **`admin`**: Full access + user management (`POST/GET /api/v1/auth/users`) + manual orphan cleanup (`POST /api/v1/resumes/cleanup`).
-- **`recruiter`**: Upload/parse resumes, create/edit/delete candidates, view profiles & stream resumes.
-- **`viewer`**: Read-only access (dashboard, candidate profiles, stats, authenticated resume viewing/downloading).
+- **`admin`**: Full access + user management (`POST/GET /api/v1/auth/users`) + manual orphan cleanup (`POST /api/v1/resumes/cleanup`) + retention purge (`POST /api/v1/privacy/purge-expired`).
+- **`recruiter`**: Upload/parse resumes (single & bulk), create/edit/delete candidates, regenerate candidate briefs, manage jobs/pipelines, score matches, view profiles & stream/export resumes.
+- **`viewer`**: Read-only access (dashboard, candidate profiles/briefs/timelines, stats, matches, compare, authenticated resume viewing & CTC-redacted exports).
+
+## Key Phase 4 Endpoints (Candidate Clarity)
+
+- `GET /api/v1/candidates/{id}/brief?blind=false` — Lazy-generated, cached candidate brief (≤5-line summary, 2–4 strengths, 0–4 neutral "worth verifying" items; refreshes automatically when job-relevant profile fields change).
+- `POST /api/v1/candidates/{id}/brief/regenerate` — Force-regenerate a candidate brief (`admin` / `recruiter`).
+- `GET /api/v1/candidates/{id}/timeline?gap_months=3` — Normalized career timeline, gap & overlap markers, tenure statistics, and informational-only consistency checks.
+- `GET /api/v1/jobs/{id}/shortlist/export/pdf?candidate_ids=...&blind=false` — Multi-page Shortlist Pack PDF (one page per candidate: brief, timeline summary, top skills, JD skill-gap & match explanation; omits CTC for `viewer`; audit-logged).
 
 ## Deployment Topology (Vercel + Render + Neon + R2)
 
