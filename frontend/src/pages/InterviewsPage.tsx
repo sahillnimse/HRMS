@@ -168,8 +168,9 @@ export default function InterviewsPage() {
                       </Badge>
                       {iv.scorecard_aggregate.count > 0 && (
                         <Badge variant="success">
-                          ★ {iv.scorecard_aggregate.average_rating}/{iv.scorecard_aggregate.scale} (
-                          {iv.scorecard_aggregate.count})
+                          {iv.scorecard_aggregate.average_rating != null
+                            ? `★ ${iv.scorecard_aggregate.average_rating}/${iv.scorecard_aggregate.scale} (${iv.scorecard_aggregate.count})`
+                            : `${iv.scorecard_aggregate.count} scorecard${iv.scorecard_aggregate.count === 1 ? '' : 's'} (submit yours to view)`}
                         </Badge>
                       )}
                     </div>
@@ -244,7 +245,9 @@ export default function InterviewsPage() {
         <div className="space-y-3">
           {emailTemplates.map((tpl) => {
             const isEditing = editingTpl?.id === tpl.id
-            const isRejection = tpl.key.toLowerCase().includes('reject')
+            const isRejection =
+              tpl.key.toLowerCase().includes('reject') ||
+              (tpl.stage_trigger || '').toLowerCase() === 'rejected'
             return (
               <Card key={tpl.id}>
                 <CardContent className="p-5 space-y-3">

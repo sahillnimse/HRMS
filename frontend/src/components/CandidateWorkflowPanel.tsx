@@ -110,7 +110,9 @@ export function CandidateWorkflowPanel({
         api.get<ScorecardAggregate>(`/candidates/${candidateId}/scorecard-summary`),
         api.get<ScorecardTemplate[]>('/scorecard-templates/'),
         api.get<EmailTemplate[]>('/email-templates/'),
-        api.get<EmailLogItem[]>(`/candidates/${candidateId}/emails`),
+        api.get<EmailLogItem[]>(`/candidates/${candidateId}/emails`, {
+          params: blindMode ? { blind: true } : undefined,
+        }),
       ])
       setApplications(appsRes.data)
       if (appsRes.data.length > 0) {
@@ -119,14 +121,14 @@ export function CandidateWorkflowPanel({
       setScorecardSummary(sumRes.data)
       setScorecardTemplates(tplRes.data)
       setEmailTemplates(emailTplRes.data)
-      if (emailTplRes.data.length > 0 && !selectedTplKey) {
-        setSelectedTplKey(emailTplRes.data[0].key)
+      if (emailTplRes.data.length > 0) {
+        setSelectedTplKey((prev) => prev || emailTplRes.data[0].key)
       }
       setEmailLogs(emailLogRes.data)
     } finally {
       setLoading(false)
     }
-  }, [candidateId, selectedTplKey])
+  }, [candidateId, blindMode])
 
   useEffect(() => {
     void loadBase()
@@ -249,10 +251,14 @@ export function CandidateWorkflowPanel({
     }
   }
 
+  const selectedEmailTpl = emailTemplates.find((t) => t.key === selectedTplKey) ?? null
+  const isRejectionTemplate =
+    (selectedTplKey || '').toLowerCase().includes('reject') ||
+    (selectedEmailTpl?.stage_trigger || '').toLowerCase() === 'rejected'
+
   const handleSendEmail = async () => {
     if (!emailPreview) return
-    const isRej = (selectedTplKey || '').toLowerCase().includes('reject')
-    if (isRej && !confirmRejection) {
+    if (isRejectionTemplate && !confirmRejection) {
       addToast('Please confirm before sending a rejection email.', 'error')
       return
     }
@@ -709,7 +715,7 @@ export function CandidateWorkflowPanel({
                       setEmailPreview((p) => (p ? { ...p, body: e.target.value } : p))
                     }
                   />
-                  {selectedTplKey.toLowerCase().includes('reject') && (
+                  {isRejectionTemplate && (
                     <label className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
                       <input
                         type="checkbox"

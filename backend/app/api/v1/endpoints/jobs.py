@@ -475,9 +475,11 @@ async def list_application_interviews_endpoint(
     application_id: UUID,
     blind: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role(*READ_ROLES)),
+    current_user: User = Depends(require_role(*READ_ROLES)),
 ):
-    return await list_application_interviews(db, application_id, blind=blind)
+    return await list_application_interviews(
+        db, application_id, blind=blind, viewer_user=current_user
+    )
 
 
 @applications_router.post(

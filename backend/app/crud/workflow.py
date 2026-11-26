@@ -44,7 +44,7 @@ from app.schemas.workflow import (
     ScorecardTemplateCreate,
     ScorecardTemplateUpdate,
 )
-from app.services.audit import blind_candidate_label, record_audit
+from app.services.audit import _mask_tokens_in_text, blind_candidate_label, record_audit
 from app.services.email_sender import EmailSender, email_sender as default_email_sender, render_email_template
 
 
@@ -125,7 +125,12 @@ async def get_candidate_scorecard_summary(
 # Interviews
 # ---------------------------------------------------------------------------
 
-def _to_interview_response(iv: Interview, *, blind: bool = False) -> InterviewResponse:
+def _to_interview_response(
+    iv: Interview,
+    *,
+    blind: bool = False,
+    viewer_user: Optional[User] = None,
+) -> InterviewResponse:
     app_obj = iv.application
     cand = app_obj.candidate if app_obj else None
     job = app_obj.job if app_obj else None
@@ -143,6 +148,15 @@ def _to_interview_response(iv: Interview, *, blind: bool = False) -> InterviewRe
         )
         for p in (iv.participants or [])
     ]
+    all_scs = list(iv.scorecards or [])
+    agg = compute_scorecard_aggregate(all_scs)
+    if viewer_user is not None and viewer_user.role != UserRole.admin:
+        participant_ids = {p.user_id for p in (iv.participants or [])}
+        has_submitted = any(s.interviewer_id == viewer_user.id for s in all_scs)
+        if viewer_user.id in participant_ids and not has_submitted:
+            # Do not leak peer ratings or recommendation spread before this interviewer submits
+            agg = ScorecardAggregate(count=agg.count, scale=agg.scale)
+
     return InterviewResponse(
         id=iv.id,
         application_id=iv.application_id,
@@ -160,7 +174,7 @@ def _to_interview_response(iv: Interview, *, blind: bool = False) -> InterviewRe
         created_at=iv.created_at,
         updated_at=iv.updated_at,
         participants=participants,
-        scorecard_aggregate=compute_scorecard_aggregate(iv.scorecards or []),
+        scorecard_aggregate=agg,
     )
 
 
@@ -240,6 +254,7 @@ async def list_application_interviews(
     application_id: UUID,
     *,
     blind: bool = False,
+    viewer_user: Optional[User] = None,
 ) -> List[InterviewResponse]:
     rows = (
         await db.execute(
@@ -254,7 +269,7 @@ async def list_application_interviews(
             .order_by(Interview.scheduled_at.asc())
         )
     ).scalars().all()
-    return [_to_interview_response(r, blind=blind) for r in rows]
+    return [_to_interview_response(r, blind=blind, viewer_user=viewer_user) for r in rows]
 
 
 async def list_my_interviews(
@@ -262,6 +277,7 @@ async def list_my_interviews(
     user_id: UUID,
     *,
     blind: bool = False,
+    viewer_user: Optional[User] = None,
 ) -> List[InterviewResponse]:
     iv_ids = list(
         (
@@ -286,7 +302,7 @@ async def list_my_interviews(
         .order_by(Interview.scheduled_at.asc())
     )
     rows = (await db.execute(stmt)).scalars().all()
-    return [_to_interview_response(r, blind=blind) for r in rows]
+    return [_to_interview_response(r, blind=blind, viewer_user=viewer_user) for r in rows]
 
 
 async def get_interview_detail(
@@ -294,9 +310,10 @@ async def get_interview_detail(
     interview_id: UUID,
     *,
     blind: bool = False,
+    viewer_user: Optional[User] = None,
 ) -> Optional[InterviewResponse]:
     iv = await _load_interview(db, interview_id)
-    return _to_interview_response(iv, blind=blind) if iv else None
+    return _to_interview_response(iv, blind=blind, viewer_user=viewer_user) if iv else None
 
 
 async def update_interview(
@@ -687,8 +704,17 @@ async def send_candidate_email(
     actor_id: UUID,
     sender: Optional[EmailSender] = None,
 ) -> Tuple[Optional[EmailLogResponse], Optional[str]]:
-    # Rejection emails always require explicit manual confirmation
-    if payload.template_key and "reject" in payload.template_key.lower() and not payload.confirm_rejection:
+    # Rejection emails always require explicit manual confirmation (by key OR stage_trigger)
+    is_rejection_email = bool(payload.template_key and "reject" in payload.template_key.lower())
+    if payload.template_key and not is_rejection_email:
+        tpl_row = (
+            await db.execute(
+                select(EmailTemplate).where(EmailTemplate.key == payload.template_key)
+            )
+        ).scalar_one_or_none()
+        if tpl_row is not None and (tpl_row.stage_trigger or "").lower() == "rejected":
+            is_rejection_email = True
+    if is_rejection_email and not payload.confirm_rejection:
         return None, "rejection_confirmation_required"
 
     preview, err = await build_email_preview(
@@ -769,7 +795,12 @@ async def send_candidate_email(
     )
 
 
-async def list_candidate_emails(db: AsyncSession, candidate_id: UUID) -> List[EmailLogResponse]:
+async def list_candidate_emails(
+    db: AsyncSession,
+    candidate_id: UUID,
+    *,
+    blind: bool = False,
+) -> List[EmailLogResponse]:
     rows = (
         await db.execute(
             select(EmailLog)
@@ -778,14 +809,27 @@ async def list_candidate_emails(db: AsyncSession, candidate_id: UUID) -> List[Em
             .order_by(EmailLog.created_at.desc())
         )
     ).scalars().all()
+
+    mask_tokens: list[str] = []
+    if blind and rows:
+        cand = (
+            await db.execute(select(Candidate).where(Candidate.id == candidate_id))
+        ).scalar_one_or_none()
+        if cand is not None:
+            if cand.full_name:
+                mask_tokens.append(cand.full_name)
+                mask_tokens.extend(p for p in cand.full_name.split() if len(p) >= 3)
+            if cand.email:
+                mask_tokens.append(cand.email)
+
     return [
         EmailLogResponse(
             id=r.id,
             candidate_id=r.candidate_id,
             application_id=r.application_id,
             template_key=r.template_key,
-            to=r.to_email,
-            subject=r.subject,
+            to="[Redacted]" if blind else r.to_email,
+            subject=_mask_tokens_in_text(r.subject, mask_tokens) if blind else r.subject,
             status=r.status,
             error=r.error,
             created_by=r.created_by,

@@ -51,7 +51,7 @@ async def get_my_interviews(
     current_user: User = Depends(require_role(*READ_ROLES)),
 ):
     """List interviews where the current user is a participant or organizer."""
-    return await list_my_interviews(db, current_user.id, blind=blind)
+    return await list_my_interviews(db, current_user.id, blind=blind, viewer_user=current_user)
 
 
 @interviews_router.get("/interviewers", response_model=List[InterviewParticipantOut])
@@ -81,9 +81,9 @@ async def get_interview_endpoint(
     interview_id: UUID,
     blind: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role(*READ_ROLES)),
+    current_user: User = Depends(require_role(*READ_ROLES)),
 ):
-    iv = await get_interview_detail(db, interview_id, blind=blind)
+    iv = await get_interview_detail(db, interview_id, blind=blind, viewer_user=current_user)
     if not iv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
     return iv

@@ -170,6 +170,13 @@ async def test_interviews_ics_and_scorecard_visibility_rules(
     assert locked.json()["peer_scorecards_locked"] is True
     assert locked.json()["scorecards"] == []
 
+    # Interview detail & /mine must also redact aggregate average/recommendations for locked peer
+    locked_iv = await client.get(f"/api/v1/interviews/{iv_id}", headers=_auth(rec2_token))
+    assert locked_iv.status_code == 200
+    assert locked_iv.json()["scorecard_aggregate"]["count"] == 1
+    assert locked_iv.json()["scorecard_aggregate"]["average_rating"] is None
+    assert all(v == 0 for v in locked_iv.json()["scorecard_aggregate"]["recommendations"].values())
+
     # Admin sees all scorecards even without submitting
     admin_view = await client.get(f"/api/v1/interviews/{iv_id}/scorecards", headers=_auth(admin_token))
     assert admin_view.status_code == 200
@@ -308,19 +315,58 @@ async def test_emails_rejection_guard_offers_stage_sync_and_cascade(
     )
     assert rej_unconfirmed.status_code == 400
 
-    # Confirmed email send succeeds, appears in candidate activity timeline
+    # Custom rejection template keyed without "reject" but stage_trigger="rejected" MUST also require confirm_rejection
+    custom_key = f"not_moving_forward_{tag}"
+    custom_tpl = await client.post(
+        "/api/v1/email-templates/",
+        json={
+            "key": custom_key,
+            "subject": "Application update for {{candidate_name}}",
+            "body": "Hi {{candidate_name}}, thank you.",
+            "stage_trigger": "rejected",
+            "auto_send": True,
+        },
+        headers=_auth(admin_token),
+    )
+    assert custom_tpl.status_code == 201, custom_tpl.text
+    assert custom_tpl.json()["auto_send"] is False
+    custom_tpl_id = custom_tpl.json()["id"]
+    try:
+        custom_rej_unconfirmed = await client.post(
+            "/api/v1/emails/send",
+            json={
+                "candidate_id": cid,
+                "application_id": app_id,
+                "template_key": custom_key,
+                "confirm_rejection": False,
+            },
+            headers=_auth(rec_token),
+        )
+        assert custom_rej_unconfirmed.status_code == 400
+    finally:
+        await client.delete(f"/api/v1/email-templates/{custom_tpl_id}", headers=_auth(admin_token))
+
+    # Confirmed email send succeeds, appears in candidate activity timeline, and respects blind=true
     send_ok = await client.post(
         "/api/v1/emails/send",
         json={
             "candidate_id": cid,
             "application_id": app_id,
             "template_key": "interview_invite",
+            "subject": f"Interview for Sneha Rao {tag}",
         },
         headers=_auth(rec_token),
     )
     assert send_ok.status_code == 201, send_ok.text
     assert send_ok.json()["status"] == "sent"
     assert len(sent_messages) == 1
+
+    blind_emails = await client.get(
+        f"/api/v1/candidates/{cid}/emails", params={"blind": True}, headers=_auth(viewer_token)
+    )
+    assert blind_emails.status_code == 200
+    assert blind_emails.json()[0]["to"] == "[Redacted]"
+    assert "Sneha" not in blind_emails.json()[0]["subject"]
 
     activity = await client.get(f"/api/v1/candidates/{cid}/activity", headers=_auth(viewer_token))
     assert activity.status_code == 200

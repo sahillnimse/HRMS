@@ -578,13 +578,14 @@ async def get_candidate_scorecard_summary_endpoint(
 @router.get("/{candidate_id}/emails", response_model=List[EmailLogResponse])
 async def get_candidate_emails_endpoint(
     candidate_id: UUID,
+    blind: bool = Query(False, description="Mask recipient email and identifying subject tokens"),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_role(*READ_ROLES)),
 ):
     candidate = await get_candidate_by_id(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-    return await list_candidate_emails(db, candidate_id)
+    return await list_candidate_emails(db, candidate_id, blind=blind)
 
 
 @router.get("/{candidate_id}/notes", response_model=List[CandidateNoteResponse])

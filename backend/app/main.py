@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.core.config import settings
 from app.crud.user import create_user, get_user_by_email
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, direct_engine, engine
 from app.models.user import UserRole
 from app.services.cleanup import orphan_cleanup_loop
 
@@ -59,15 +59,19 @@ async def lifespan(_app: FastAPI):
                 await cleanup_task
             except asyncio.CancelledError:
                 pass
+        await engine.dispose()
+        if direct_engine is not engine:
+            await direct_engine.dispose()
 
 
 def create_app() -> FastAPI:
+    is_prod = settings.APP_ENV.lower() == "production"
     app = FastAPI(
         title=settings.APP_NAME,
         description="AI-powered HRMS: upload resumes, parse with AI, manage candidates.",
-        version="0.2.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        version="0.6.0",
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
         lifespan=lifespan,
     )
 
