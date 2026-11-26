@@ -15,6 +15,7 @@ import CandidateDetailPage from '@/pages/CandidateDetailPage'
 import CompareCandidatesPage from '@/pages/CompareCandidatesPage'
 import PrivacyPage from '@/pages/PrivacyPage'
 import InterviewsPage from '@/pages/InterviewsPage'
+import AnalyticsPage from '@/pages/AnalyticsPage'
 
 function App() {
   return (
@@ -110,6 +111,16 @@ function App() {
                   <ProtectedRoute>
                     <AppShell>
                       <InterviewsPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/analytics"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <AnalyticsPage />
                     </AppShell>
                   </ProtectedRoute>
                 }

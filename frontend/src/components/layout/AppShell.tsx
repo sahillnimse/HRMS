@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowRight,
+  BarChart3,
   Brain,
   Briefcase,
   Calendar,
@@ -57,6 +58,12 @@ const NAV: NavEntry[] = [
     label: 'Interviews',
     icon: Calendar,
     match: (p) => p.startsWith('/interviews'),
+  },
+  {
+    to: '/analytics',
+    label: 'Analytics',
+    icon: BarChart3,
+    match: (p) => p.startsWith('/analytics'),
   },
   {
     to: '/upload',

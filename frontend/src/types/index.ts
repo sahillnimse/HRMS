@@ -600,3 +600,76 @@ export interface CandidateCompareResponse {
   shared_skills: string[]
   job_matches: Record<string, JobMatchItem>
 }
+
+// --- Phase 6: Hiring Analytics ---
+
+export interface FunnelStageMetric {
+  stage: string
+  reached_count: number
+  current_count: number
+  conversion_from_previous_pct: number | null
+  conversion_from_applied_pct: number | null
+}
+
+export interface FunnelAnalytics {
+  total_applications: number
+  active_applications: number
+  hired_count: number
+  rejected_count: number
+  overall_hire_rate_pct: number
+  stages: FunnelStageMetric[]
+}
+
+export interface TimeInStageMetric {
+  stage: string
+  avg_days: number | null
+  median_days: number | null
+  min_days: number | null
+  max_days: number | null
+  sample_count: number
+}
+
+export interface TimeInStageAnalytics {
+  stages: TimeInStageMetric[]
+}
+
+export interface TimeToHireAnalytics {
+  hired_count: number
+  avg_days: number | null
+  median_days: number | null
+  min_days: number | null
+  max_days: number | null
+}
+
+export interface SourceMetric {
+  source: string
+  candidates_count: number
+  applications_count: number
+  screened_count: number
+  interview_count: number
+  hired_count: number
+  hire_rate_pct: number
+}
+
+export interface SourcesAnalytics {
+  total_candidates: number
+  sources: SourceMetric[]
+}
+
+export interface StuckCandidateItem {
+  application_id: string
+  candidate_id: string
+  candidate_name: string
+  job_id: string
+  job_title: string
+  stage: string
+  days_in_stage: number
+  threshold_days: number
+  stage_changed_at: string
+}
+
+export interface StuckCandidatesAnalytics {
+  thresholds: Record<string, number>
+  total_stuck: number
+  items: StuckCandidateItem[]
+}
