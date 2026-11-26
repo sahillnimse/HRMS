@@ -47,6 +47,24 @@ class Settings(BaseSettings):
     SHORT_STINT_MAX_MONTHS: int = 12
     EXPERIENCE_MISMATCH_YEARS_THRESHOLD: float = 1.5
 
+    # --- Interview Workflow, Calendar & Email (Phase 5) ---
+    DEFAULT_TIMEZONE: str = "Asia/Kolkata"
+    CALENDAR_PROVIDER: str = "ics"  # "ics" (default; Google/Outlook future extension point)
+    EMAIL_BACKEND: str = "console"  # "console" | "smtp"
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: str = "hiring@hrms.local"
+    SMTP_USE_TLS: bool = True
+    SMTP_TIMEOUT_SECONDS: int = 15
+
+    # --- Analytics Stuck-Stage Thresholds (Phase 6) ---
+    STUCK_APPLIED_DAYS: int = 7
+    STUCK_SCREENED_DAYS: int = 7
+    STUCK_INTERVIEW_DAYS: int = 10
+    STUCK_OFFER_DAYS: int = 7
+
     # --- File Storage ---
     STORAGE_BACKEND: str = "local"  # "local" | "s3" | "r2"
     UPLOAD_DIR: str = "./uploads"
