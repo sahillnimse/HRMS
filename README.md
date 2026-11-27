@@ -57,6 +57,8 @@ npm run dev
 | `ENABLE_SEMANTIC_SEARCH` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | Feature-flagged pgvector + Gemini semantic search & matching | `true` / `gemini-embedding-001` / `768` |
 | `ENABLE_CANDIDATE_BRIEF` / `CANDIDATE_BRIEF_TIMEOUT_SECONDS` | Feature-flagged AI candidate brief generation (deterministic template fallback when off/unavailable) | `true` / `25` |
 | `TIMELINE_GAP_THRESHOLD_MONTHS` / `SHORT_STINT_MAX_MONTHS` / `EXPERIENCE_MISMATCH_YEARS_THRESHOLD` | Career timeline gap threshold and neutral consistency-check thresholds (informational only) | `3` / `12` / `1.5` |
+| `EDU_DURATION_BACHELORS_MONTHS` / `EDU_DURATION_MASTERS_MONTHS` / `EDU_DURATION_DIPLOMA_MONTHS` / `EDU_ESTIMATED_GRADUATION_MONTH` | Estimated education study window lengths (months) and default graduation month (`6` = June) when a CV lists graduation year only | `48` / `24` / `36` / `6` |
+| `COUNT_INTERNSHIPS_IN_EXPERIENCE` | Whether internship/trainee roles count toward stored `years_experience` (`true` preserves default matching behavior; briefs always show full-time + internship split) | `true` |
 | `DEFAULT_TIMEZONE` / `CALENDAR_PROVIDER` | Display timezone (`Asia/Kolkata`) and calendar provider (`ics`; Google/Outlook future extension point) | `Asia/Kolkata` / `ics` |
 | `EMAIL_BACKEND` / `SMTP_*` | Pluggable email sender (`console` dev default, or `smtp` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) | `console` / `587` |
 | `STUCK_APPLIED_DAYS` / `STUCK_SCREENED_DAYS` / `STUCK_INTERVIEW_DAYS` / `STUCK_OFFER_DAYS` | Default per-stage thresholds (days) for stuck-candidate analytics | `7` / `7` / `10` / `7` |
@@ -85,7 +87,8 @@ npm run dev
 
 - `GET /api/v1/candidates/{id}/brief?blind=false` — Lazy-generated, cached candidate brief (≤5-line summary, 2–4 strengths, 0–4 neutral "worth verifying" items; refreshes automatically when job-relevant profile fields change).
 - `POST /api/v1/candidates/{id}/brief/regenerate` — Force-regenerate a candidate brief (`admin` / `recruiter`).
-- `GET /api/v1/candidates/{id}/timeline?gap_months=3` — Normalized career timeline, gap & overlap markers, tenure statistics, and informational-only consistency checks.
+- `GET /api/v1/candidates/{id}/timeline?gap_months=3&blind=false` — Normalized career timeline, study windows (real or estimated from graduation year), gap & overlap markers, employment-type-aware tenure statistics, whole-CV skill evidence, and informational-only consistency checks.
+- `POST /api/v1/candidates/admin/remap-sections?dry_run=true&limit=100` — Admin-only re-mapping of legacy candidates' education dates, work `employment_type`, and `projects` from stored resume files/text (dry-run by default; skips hand-edited sections). CLI equivalent: `python -m app.scripts.remap_sections [--apply]`.
 - `GET /api/v1/jobs/{id}/shortlist/export/pdf?candidate_ids=...&blind=false` — Multi-page Shortlist Pack PDF (one page per candidate: brief, timeline summary, top skills, JD skill-gap & match explanation; omits CTC for `viewer`; audit-logged).
 
 ## Key Phase 5 Endpoints (Interview Workflow)

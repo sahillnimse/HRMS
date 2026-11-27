@@ -4,13 +4,20 @@ import {
   Award,
   Briefcase,
   Code2,
+  FolderGit2,
   GraduationCap,
   Plus,
   Save,
   Trash2,
   User,
 } from 'lucide-react'
-import type { CandidateUpdate, DuplicateInfo, ParsedResumeData } from '@/types'
+import type {
+  CandidateUpdate,
+  DuplicateInfo,
+  EmploymentType,
+  ParsedResumeData,
+  ProjectItem,
+} from '@/types'
 import {
   getSourceFilename,
   getStoredFilename,
@@ -78,7 +85,7 @@ export function EditableReview({
 
   const handleWorkField = (
     idx: number,
-    field: 'company' | 'job_title' | 'start_date' | 'end_date',
+    field: 'company' | 'job_title' | 'employment_type' | 'start_date' | 'end_date',
     value: string | null,
   ) => {
     updateForm((prev) => {
@@ -119,13 +126,31 @@ export function EditableReview({
 
   const handleEduField = (
     idx: number,
-    field: 'degree' | 'institution' | 'graduation_year',
-    value: string | number | null,
+    field: 'degree' | 'field_of_study' | 'institution' | 'start_year' | 'end_year' | 'graduation_year' | 'is_current',
+    value: string | number | boolean | null,
   ) => {
     updateForm((prev) => {
       const edu = [...prev.education]
-      edu[idx] = { ...edu[idx], [field]: value }
+      const updated = { ...edu[idx], [field]: value }
+      if (field === 'end_year') {
+        updated.graduation_year = typeof value === 'number' ? value : null
+      } else if (field === 'graduation_year') {
+        updated.end_year = typeof value === 'number' ? value : null
+      }
+      edu[idx] = updated
       return { ...prev, education: edu }
+    })
+  }
+
+  const handleProjectField = <K extends keyof ProjectItem>(
+    idx: number,
+    field: K,
+    value: ProjectItem[K],
+  ) => {
+    updateForm((prev) => {
+      const projs = [...(prev.projects ?? [])]
+      projs[idx] = { ...projs[idx], [field]: value }
+      return { ...prev, projects: projs }
     })
   }
 
@@ -349,7 +374,14 @@ export function EditableReview({
                     ...prev,
                     work_experience: [
                       ...prev.work_experience,
-                      { company: '', job_title: '', start_date: '', end_date: '', bullets: [''] },
+                      {
+                        company: '',
+                        job_title: '',
+                        employment_type: 'full_time' as EmploymentType,
+                        start_date: '',
+                        end_date: '',
+                        bullets: [''],
+                      },
                     ],
                   }))
                 }
@@ -406,7 +438,22 @@ export function EditableReview({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Employment Type</Label>
+                      <Select
+                        value={exp.employment_type ?? 'unknown'}
+                        onChange={(e) => handleWorkField(i, 'employment_type', e.target.value)}
+                      >
+                        <option value="full_time">Full-time</option>
+                        <option value="internship">Internship</option>
+                        <option value="trainee">Trainee / Apprentice</option>
+                        <option value="contract">Contract</option>
+                        <option value="freelance">Freelance</option>
+                        <option value="part_time">Part-time</option>
+                        <option value="unknown">Unspecified</option>
+                      </Select>
+                    </div>
                     <div className="space-y-1">
                       <Label className="text-xs">Start Date</Label>
                       <Input
@@ -458,6 +505,111 @@ export function EditableReview({
           </CardContent>
         </Card>
 
+        {/* Projects */}
+        <Card>
+          <CardHeader className="pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FolderGit2 size={16} className="text-brand-600" />
+                <CardTitle>Projects</CardTitle>
+                <Badge variant="secondary">{(form.projects ?? []).length}</Badge>
+              </div>
+              <Button
+                type="button"
+                variant="soft"
+                size="sm"
+                onClick={() =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    projects: [
+                      ...(prev.projects ?? []),
+                      { name: '', description: '', technologies: [], start_date: null, end_date: null },
+                    ],
+                  }))
+                }
+              >
+                <Plus size={14} /> Add project
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(form.projects ?? []).length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
+                No projects recorded. Click “Add project” to capture academic or personal builds.
+              </p>
+            ) : (
+              (form.projects ?? []).map((proj, pi) => (
+                <div
+                  key={pi}
+                  className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/50 p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Project {pi + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateForm((prev) => ({
+                          ...prev,
+                          projects: (prev.projects ?? []).filter((_, idx) => idx !== pi),
+                        }))
+                      }
+                      className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="space-y-1 sm:col-span-1">
+                      <Label className="text-xs">Project Name</Label>
+                      <Input
+                        value={proj.name}
+                        onChange={(e) => handleProjectField(pi, 'name', e.target.value)}
+                        placeholder="Resume Matcher"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Start Date</Label>
+                      <Input
+                        value={proj.start_date ?? ''}
+                        onChange={(e) => handleProjectField(pi, 'start_date', e.target.value || null)}
+                        placeholder="Jan 2024"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">End Date</Label>
+                      <Input
+                        value={proj.end_date ?? ''}
+                        onChange={(e) => handleProjectField(pi, 'end_date', e.target.value || null)}
+                        placeholder="Apr 2024"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Description</Label>
+                    <Textarea
+                      rows={2}
+                      value={proj.description}
+                      onChange={(e) => handleProjectField(pi, 'description', e.target.value)}
+                      placeholder="Concise summary of what was built and key outcomes…"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Technologies Used</Label>
+                    <TagInput
+                      value={proj.technologies}
+                      onChange={(next) => handleProjectField(pi, 'technologies', next)}
+                      placeholder="Python, React, Docker…"
+                      tone={{ bg: '#ecfdf5', text: '#065f46' }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
         {/* Education */}
         <Card>
           <CardHeader className="pb-4">
@@ -476,7 +628,15 @@ export function EditableReview({
                     ...prev,
                     education: [
                       ...prev.education,
-                      { degree: '', institution: '', graduation_year: null },
+                      {
+                        degree: '',
+                        field_of_study: null,
+                        institution: '',
+                        start_year: null,
+                        end_year: null,
+                        graduation_year: null,
+                        is_current: false,
+                      },
                     ],
                   }))
                 }
@@ -492,53 +652,95 @@ export function EditableReview({
               form.education.map((edu, i) => (
                 <div
                   key={i}
-                  className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5 sm:grid-cols-12 sm:items-end"
+                  className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5"
                 >
-                  <div className="space-y-1 sm:col-span-5">
-                    <Label className="text-xs">Degree</Label>
-                    <Input
-                      value={edu.degree}
-                      onChange={(e) => handleEduField(i, 'degree', e.target.value)}
-                      placeholder="B.S. Computer Science"
-                    />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-end">
+                    <div className="space-y-1 sm:col-span-4">
+                      <Label className="text-xs">Degree</Label>
+                      <Input
+                        value={edu.degree}
+                        onChange={(e) => handleEduField(i, 'degree', e.target.value)}
+                        placeholder="B.E. / B.Tech / M.S."
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-4">
+                      <Label className="text-xs">Field of Study</Label>
+                      <Input
+                        value={edu.field_of_study ?? ''}
+                        onChange={(e) =>
+                          handleEduField(i, 'field_of_study', e.target.value || null)
+                        }
+                        placeholder="Computer Science"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-3">
+                      <Label className="text-xs">Institution</Label>
+                      <Input
+                        value={edu.institution}
+                        onChange={(e) => handleEduField(i, 'institution', e.target.value)}
+                        placeholder="University"
+                      />
+                    </div>
+                    <div className="flex justify-end sm:col-span-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateForm((prev) => ({
+                            ...prev,
+                            education: prev.education.filter((_, idx) => idx !== i),
+                          }))
+                        }
+                        className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Remove education"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="space-y-1 sm:col-span-4">
-                    <Label className="text-xs">Institution</Label>
-                    <Input
-                      value={edu.institution}
-                      onChange={(e) => handleEduField(i, 'institution', e.target.value)}
-                      placeholder="University"
-                    />
-                  </div>
-                  <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-xs">Year</Label>
-                    <Input
-                      type="number"
-                      value={edu.graduation_year != null ? String(edu.graduation_year) : ''}
-                      onChange={(e) =>
-                        handleEduField(
-                          i,
-                          'graduation_year',
-                          e.target.value ? parseInt(e.target.value, 10) : null,
-                        )
-                      }
-                      placeholder="2020"
-                    />
-                  </div>
-                  <div className="flex justify-end sm:col-span-1">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          education: prev.education.filter((_, idx) => idx !== i),
-                        }))
-                      }
-                      className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      aria-label="Remove education"
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-12 sm:items-center">
+                    <div className="space-y-1 sm:col-span-3">
+                      <Label className="text-xs">Start Year</Label>
+                      <Input
+                        type="number"
+                        value={edu.start_year != null ? String(edu.start_year) : ''}
+                        onChange={(e) =>
+                          handleEduField(
+                            i,
+                            'start_year',
+                            e.target.value ? parseInt(e.target.value, 10) : null,
+                          )
+                        }
+                        placeholder="2020"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-3">
+                      <Label className="text-xs">End / Grad Year</Label>
+                      <Input
+                        type="number"
+                        value={
+                          (edu.end_year ?? edu.graduation_year) != null
+                            ? String(edu.end_year ?? edu.graduation_year)
+                            : ''
+                        }
+                        onChange={(e) =>
+                          handleEduField(
+                            i,
+                            'end_year',
+                            e.target.value ? parseInt(e.target.value, 10) : null,
+                          )
+                        }
+                        placeholder="2024"
+                      />
+                    </div>
+                    <label className="col-span-2 flex items-center gap-2 pt-4 text-xs font-medium text-slate-600 sm:col-span-6">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(edu.is_current)}
+                        onChange={(e) => handleEduField(i, 'is_current', e.target.checked)}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
+                      Currently studying / Pursuing
+                    </label>
                   </div>
                 </div>
               ))

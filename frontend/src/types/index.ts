@@ -16,9 +16,19 @@ export interface TokenResponse {
   user: User
 }
 
+export type EmploymentType =
+  | 'full_time'
+  | 'internship'
+  | 'trainee'
+  | 'contract'
+  | 'freelance'
+  | 'part_time'
+  | 'unknown'
+
 export interface WorkExperienceItem {
   company: string
   job_title: string
+  employment_type?: EmploymentType
   start_date: string | null
   end_date: string | null
   bullets: string[]
@@ -26,8 +36,20 @@ export interface WorkExperienceItem {
 
 export interface EducationItem {
   degree: string
+  field_of_study?: string | null
   institution: string
+  start_year?: number | null
+  end_year?: number | null
   graduation_year: number | null
+  is_current?: boolean
+}
+
+export interface ProjectItem {
+  name: string
+  description: string
+  technologies: string[]
+  start_date?: string | null
+  end_date?: string | null
 }
 
 /** Shape shared by parsed resumes, saved candidates and the edit form. */
@@ -44,6 +66,7 @@ export interface CandidateProfileData {
   primary_domain: string
   work_experience: WorkExperienceItem[]
   education: EducationItem[]
+  projects?: ProjectItem[]
   technical_skills: string[]
   tools: string[]
   soft_skills: string[]
@@ -209,6 +232,7 @@ export interface CandidateUpdate {
   primary_domain?: string
   work_experience?: WorkExperienceItem[]
   education?: EducationItem[]
+  projects?: ProjectItem[]
   technical_skills?: string[]
   tools?: string[]
   soft_skills?: string[]
@@ -402,6 +426,7 @@ export interface TimelineRole {
   index: number
   company: string
   job_title: string
+  employment_type?: EmploymentType | string
   raw_start: string | null
   raw_end: string | null
   start_ym: string | null
@@ -411,6 +436,22 @@ export interface TimelineRole {
   duration_months: number | null
   is_current: boolean
   has_invalid_dates: boolean
+}
+
+export interface TimelineEducation {
+  index: number
+  degree: string
+  field_of_study?: string | null
+  institution: string
+  start_year: number | null
+  end_year: number | null
+  graduation_year: number | null
+  start_ym: string | null
+  end_ym: string | null
+  start_month_index: number | null
+  end_month_index: number | null
+  is_current: boolean
+  estimated: boolean
 }
 
 export interface TimelineGap {
@@ -427,11 +468,23 @@ export interface TimelineOverlap {
   roles: string[]
 }
 
+export interface SkillEvidenceItem {
+  skill: string
+  sources: string[]
+}
+
 export interface TenureStats {
   total_years: number
   total_months: number
+  full_time_years?: number
+  internship_months?: number
   role_count: number
   dated_role_count: number
+  core_role_count?: number
+  core_dated_role_count?: number
+  internship_count?: number
+  trainee_count?: number
+  contract_count?: number
   average_tenure_months: number
   jobs_last_5_years: number
   short_stints_count: number
@@ -441,10 +494,12 @@ export interface CandidateTimeline {
   candidate_id: string
   gap_threshold_months: number
   roles: TimelineRole[]
+  study_windows?: TimelineEducation[]
   gaps: TimelineGap[]
   overlaps: TimelineOverlap[]
   tenure_stats: TenureStats
   consistency_checks: ConsistencyCheckItem[]
+  skill_evidence?: SkillEvidenceItem[]
 }
 
 export interface InterviewParticipant {

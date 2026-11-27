@@ -34,7 +34,13 @@ import { CandidateNetworkGraph } from '@/components/CandidateNetworkGraph'
 import { CandidateNotesAndActivity } from '@/components/CandidateNotesAndActivity'
 import { EditableReview } from '@/components/EditableReview'
 import { ResumePreview } from '@/components/ResumePreview'
-import type { ApplicationItem, CandidateResponse, CandidateUpdate } from '@/types'
+import type {
+  ApplicationItem,
+  CandidateResponse,
+  CandidateTimeline,
+  CandidateUpdate,
+  SkillEvidenceItem,
+} from '@/types'
 
 type DetailTab = 'overview' | 'timeline' | 'workflow' | 'network' | 'activity' | 'resume' | 'edit'
 
@@ -59,12 +65,31 @@ export default function CandidateDetailPage() {
   const [candidateApps, setCandidateApps] = useState<ApplicationItem[]>([])
   const [addingJobId, setAddingJobId] = useState<string | null>(null)
   const [activityRefresh, setActivityRefresh] = useState(0)
+  const [skillEvidence, setSkillEvidence] = useState<SkillEvidenceItem[]>([])
 
   useEffect(() => {
     if (id) {
       void getCandidate(id, { blind: blindMode })
     }
   }, [id, blindMode, getCandidate])
+
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    api
+      .get<CandidateTimeline>(`/candidates/${id}/timeline`, {
+        params: blindMode ? { blind: true } : undefined,
+      })
+      .then((res) => {
+        if (active) setSkillEvidence(res.data.skill_evidence ?? [])
+      })
+      .catch(() => {
+        if (active) setSkillEvidence([])
+      })
+    return () => {
+      active = false
+    }
+  }, [id, blindMode, activityRefresh])
 
   useEffect(() => {
     if (blindMode && tab === 'resume') {
@@ -291,10 +316,11 @@ export default function CandidateDetailPage() {
           resumeFileId={selected.resume_file_id}
           createdAt={selected.created_at}
           showGraph
+          skillEvidence={skillEvidence}
         />
       )}
 
-      {tab === 'timeline' && <CareerTimeline candidateId={selected.id} />}
+      {tab === 'timeline' && <CareerTimeline candidateId={selected.id} refreshKey={activityRefresh} />}
 
       {tab === 'workflow' && (
         <CandidateWorkflowPanel

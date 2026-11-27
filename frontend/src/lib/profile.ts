@@ -1,9 +1,25 @@
 import type {
   CandidateProfileData,
   CandidateUpdate,
+  EmploymentType,
   ParsedResumeData,
   WorkExperienceItem,
 } from '@/types'
+
+const EMPLOYMENT_TYPE_LABELS: Record<string, string> = {
+  full_time: 'Full-time',
+  internship: 'Internship',
+  trainee: 'Trainee',
+  contract: 'Contract',
+  freelance: 'Freelance',
+  part_time: 'Part-time',
+  unknown: 'Unspecified',
+}
+
+export function formatEmploymentType(type?: string | null): string | null {
+  if (!type || type === 'unknown' || type === 'full_time') return null
+  return EMPLOYMENT_TYPE_LABELS[type] ?? type
+}
 
 const AVATAR_GRADIENTS = [
   'from-brand-500 to-teal-700',
@@ -102,16 +118,38 @@ export function normalizeProfile(src: ProfileSource): ParsedResumeData {
       ? src.work_experience.map((w) => ({
           company: w?.company ?? '',
           job_title: w?.job_title ?? '',
+          employment_type: (w?.employment_type as EmploymentType | undefined) ?? 'unknown',
           start_date: w?.start_date ?? null,
           end_date: w?.end_date ?? null,
           bullets: toStringList(w?.bullets),
         }))
       : [],
     education: Array.isArray(src.education)
-      ? src.education.map((e) => ({
-          degree: e?.degree ?? '',
-          institution: e?.institution ?? '',
-          graduation_year: typeof e?.graduation_year === 'number' ? e.graduation_year : null,
+      ? src.education.map((e) => {
+          const endYr =
+            typeof e?.end_year === 'number'
+              ? e.end_year
+              : typeof e?.graduation_year === 'number'
+                ? e.graduation_year
+                : null
+          return {
+            degree: e?.degree ?? '',
+            field_of_study: e?.field_of_study ?? null,
+            institution: e?.institution ?? '',
+            start_year: typeof e?.start_year === 'number' ? e.start_year : null,
+            end_year: endYr,
+            graduation_year: endYr,
+            is_current: Boolean(e?.is_current),
+          }
+        })
+      : [],
+    projects: Array.isArray(src.projects)
+      ? src.projects.map((p) => ({
+          name: p?.name ?? '',
+          description: p?.description ?? '',
+          technologies: toStringList(p?.technologies),
+          start_date: p?.start_date ?? null,
+          end_date: p?.end_date ?? null,
         }))
       : [],
     technical_skills: toStringList(src.technical_skills),
@@ -171,16 +209,33 @@ export function toCandidatePayload(f: ParsedResumeData): CandidateUpdate {
       .map((w) => ({
         company: w.company.trim(),
         job_title: w.job_title.trim(),
+        employment_type: w.employment_type ?? 'unknown',
         start_date: clean(w.start_date),
         end_date: clean(w.end_date),
         bullets: list(w.bullets),
       })),
     education: f.education
       .filter((e) => e.degree.trim() || e.institution.trim())
-      .map((e) => ({
-        degree: e.degree.trim(),
-        institution: e.institution.trim(),
-        graduation_year: e.graduation_year,
+      .map((e) => {
+        const endYr = e.end_year ?? e.graduation_year ?? null
+        return {
+          degree: e.degree.trim(),
+          field_of_study: clean(e.field_of_study),
+          institution: e.institution.trim(),
+          start_year: e.start_year ?? null,
+          end_year: endYr,
+          graduation_year: endYr,
+          is_current: Boolean(e.is_current),
+        }
+      }),
+    projects: (f.projects ?? [])
+      .filter((p) => p.name.trim() || p.description.trim())
+      .map((p) => ({
+        name: p.name.trim() || 'Untitled Project',
+        description: p.description.trim(),
+        technologies: list(p.technologies),
+        start_date: clean(p.start_date),
+        end_date: clean(p.end_date),
       })),
     technical_skills: list(f.technical_skills),
     tools: list(f.tools),

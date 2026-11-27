@@ -8,6 +8,7 @@ import {
   ExternalLink,
   EyeOff,
   FileText,
+  FolderGit2,
   Github,
   Globe,
   GraduationCap,
@@ -21,7 +22,7 @@ import {
   Users,
   Wrench,
 } from 'lucide-react'
-import type { CandidateProfileData } from '@/types'
+import type { CandidateProfileData, SkillEvidenceItem } from '@/types'
 import { fetchResumeBlob } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { useBlindMode } from '@/contexts/BlindModeContext'
@@ -30,6 +31,7 @@ import {
   computeCompleteness,
   ensureProtocol,
   formatCtc,
+  formatEmploymentType,
   getCurrentRole,
   getSeniority,
   getSourceFilename,
@@ -50,6 +52,14 @@ interface CandidateProfileOverviewProps {
   createdAt?: string | null
   showGraph?: boolean
   headerActions?: React.ReactNode
+  skillEvidence?: SkillEvidenceItem[]
+}
+
+const EVIDENCE_SOURCE_LABELS: Record<string, string> = {
+  experience: 'Experience',
+  projects: 'Projects',
+  certification: 'Certification',
+  education: 'Education',
 }
 
 function CompletenessRing({ score, missing }: { score: number; missing: string[] }) {
@@ -106,11 +116,18 @@ export function CandidateProfileOverview({
   createdAt,
   showGraph = true,
   headerActions,
+  skillEvidence,
 }: CandidateProfileOverviewProps) {
   const [copiedEmail, setCopiedEmail] = useState(false)
   const [openingCv, setOpeningCv] = useState(false)
   const { canWrite } = useAuth()
   const { blindMode } = useBlindMode()
+
+  const evidenceMap = new Map<string, string[]>()
+  for (const item of skillEvidence ?? []) {
+    evidenceMap.set(item.skill.toLowerCase(), item.sources)
+  }
+  const hasEvidenceData = (skillEvidence?.length ?? 0) > 0
 
   const currentRole = getCurrentRole(profile.work_experience)
   const seniority = getSeniority(profile.years_experience)
@@ -409,9 +426,16 @@ export function CandidateProfileOverview({
                         <div className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 transition hover:border-slate-300/90 hover:bg-white">
                           <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                              <h4 className="text-[15px] font-semibold text-slate-900">
-                                {exp.job_title || 'Untitled Role'}
-                              </h4>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-[15px] font-semibold text-slate-900">
+                                  {exp.job_title || 'Untitled Role'}
+                                </h4>
+                                {formatEmploymentType(exp.employment_type) && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {formatEmploymentType(exp.employment_type)}
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="text-sm font-medium text-brand-700">{exp.company}</p>
                             </div>
                             <div className="flex items-center gap-1.5">
@@ -454,6 +478,57 @@ export function CandidateProfileOverview({
             </CardContent>
           </Card>
 
+          {/* Projects */}
+          {profile.projects && profile.projects.length > 0 && (
+            <Card>
+              <CardHeader className="pb-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FolderGit2 size={16} className="text-brand-600" />
+                    <CardTitle>Projects</CardTitle>
+                  </div>
+                  <Badge variant="secondary">
+                    {profile.projects.length} project{profile.projects.length === 1 ? '' : 's'}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {profile.projects.map((proj, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 space-y-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-slate-900">
+                        {proj.name || 'Untitled Project'}
+                      </h4>
+                      {(proj.start_date || proj.end_date) && (
+                        <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                          {[proj.start_date, proj.end_date].filter(Boolean).join(' – ')}
+                        </span>
+                      )}
+                    </div>
+                    {proj.description && (
+                      <p className="text-xs leading-5 text-slate-600">{proj.description}</p>
+                    )}
+                    {proj.technologies && proj.technologies.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {proj.technologies.map((tech, ti) => (
+                          <span
+                            key={ti}
+                            className="rounded-md bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                          >
+                            {tech}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Education */}
           <Card>
             <CardHeader className="pb-4">
@@ -467,23 +542,42 @@ export function CandidateProfileOverview({
                 <p className="text-sm text-slate-500">No education entries recorded.</p>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {profile.education.map((edu, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-start gap-3 rounded-xl border border-slate-200/80 bg-amber-50/30 p-4"
-                    >
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700">
-                        <GraduationCap size={18} />
+                  {profile.education.map((edu, idx) => {
+                    const endYr = edu.end_year ?? edu.graduation_year
+                    const dateLabel = edu.is_current
+                      ? edu.start_year
+                        ? `${edu.start_year} – Present`
+                        : endYr
+                          ? `Expected ${endYr}`
+                          : 'Pursuing'
+                      : edu.start_year && endYr
+                        ? `${edu.start_year} – ${endYr}`
+                        : endYr
+                          ? `Class of ${endYr}`
+                          : null
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-3 rounded-xl border border-slate-200/80 bg-amber-50/30 p-4"
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700">
+                          <GraduationCap size={18} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {edu.degree || 'Degree'}
+                            {edu.field_of_study ? ` · ${edu.field_of_study}` : ''}
+                          </p>
+                          <p className="text-xs font-medium text-slate-600">
+                            {blindMode ? '[Institution Redacted]' : edu.institution}
+                          </p>
+                          {dateLabel && (
+                            <p className="mt-1 text-xs text-slate-500">{dateLabel}</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">{edu.degree || 'Degree'}</p>
-                        <p className="text-xs font-medium text-slate-600">{edu.institution}</p>
-                        {edu.graduation_year && (
-                          <p className="mt-1 text-xs text-slate-500">Class of {edu.graduation_year}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </CardContent>
@@ -510,14 +604,38 @@ export function CandidateProfileOverview({
                 </div>
                 {profile.technical_skills.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {profile.technical_skills.map((skill, i) => (
-                      <span
-                        key={i}
-                        className="rounded-lg border border-violet-200/80 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-800"
-                      >
-                        {skill}
-                      </span>
-                    ))}
+                    {profile.technical_skills.map((skill, i) => {
+                      const sources = evidenceMap.get(skill.toLowerCase())
+                      const evidenced = Boolean(sources && sources.length > 0)
+                      const tooltip = !hasEvidenceData
+                        ? undefined
+                        : evidenced
+                          ? `Evidenced in: ${sources!.map((s) => EVIDENCE_SOURCE_LABELS[s] || s).join(', ')}`
+                          : 'Not evidenced in experience, projects, or credentials'
+                      return (
+                        <span
+                          key={i}
+                          title={tooltip}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium',
+                            !hasEvidenceData || evidenced
+                              ? 'border-violet-200/80 bg-violet-50 text-violet-800'
+                              : 'border-dashed border-slate-300 bg-slate-50 text-slate-600',
+                          )}
+                        >
+                          {hasEvidenceData && (
+                            <span
+                              className={cn(
+                                'h-1.5 w-1.5 rounded-full shrink-0',
+                                evidenced ? 'bg-emerald-500' : 'bg-slate-300',
+                              )}
+                              aria-hidden="true"
+                            />
+                          )}
+                          {skill}
+                        </span>
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400">None listed</p>
@@ -533,17 +651,53 @@ export function CandidateProfileOverview({
                 </div>
                 {profile.tools.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {profile.tools.map((tool, i) => (
-                      <span
-                        key={i}
-                        className="rounded-lg border border-emerald-200/80 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800"
-                      >
-                        {tool}
-                      </span>
-                    ))}
+                    {profile.tools.map((tool, i) => {
+                      const sources = evidenceMap.get(tool.toLowerCase())
+                      const evidenced = Boolean(sources && sources.length > 0)
+                      const tooltip = !hasEvidenceData
+                        ? undefined
+                        : evidenced
+                          ? `Evidenced in: ${sources!.map((s) => EVIDENCE_SOURCE_LABELS[s] || s).join(', ')}`
+                          : 'Not evidenced in experience, projects, or credentials'
+                      return (
+                        <span
+                          key={i}
+                          title={tooltip}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium',
+                            !hasEvidenceData || evidenced
+                              ? 'border-emerald-200/80 bg-emerald-50 text-emerald-800'
+                              : 'border-dashed border-slate-300 bg-slate-50 text-slate-600',
+                          )}
+                        >
+                          {hasEvidenceData && (
+                            <span
+                              className={cn(
+                                'h-1.5 w-1.5 rounded-full shrink-0',
+                                evidenced ? 'bg-emerald-500' : 'bg-slate-300',
+                              )}
+                              aria-hidden="true"
+                            />
+                          )}
+                          {tool}
+                        </span>
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400">None listed</p>
+                )}
+                {hasEvidenceData && (
+                  <p className="mt-2.5 flex items-center gap-3 text-[11px] text-slate-400">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      Evidenced in CV (hover for section)
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                      Skills list only
+                    </span>
+                  </p>
                 )}
               </div>
 
