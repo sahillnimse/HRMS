@@ -306,3 +306,371 @@ async def test_admin_remap_endpoint_dry_run_and_hand_edit_protection(
     assert after_data["work_experience"][0]["employment_type"] == "internship"
     assert len(after_data["projects"]) == 1
     assert after_data["projects"][0]["name"] == "Campus Portal"
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 unit & API tests: study windows, employment types, whole-CV skill evidence, brief cache
+# ---------------------------------------------------------------------------
+
+
+def test_bug_shape_fresher_profile_fires_zero_false_flags():
+    """
+    Reproduce the exact reported fresher profile:
+      - B.E. graduated in 2024 (old shape: graduation_year only, no start_year!)
+      - Internships / trainee stints during 2023-24 with a 9-month span (2023-05 to 2024-01) during college
+      - Full-time role only after graduating (Jul 2024 - Present)
+      - Skills evidenced across summary, work bullets, projects, certifications, education, and ML/Postgres aliases
+    NONE of the three false flags (employment_gap, repeated_short_stints, unverified_listed_skills) may fire.
+    """
+    from app.services.consistency import compute_skill_evidence, run_consistency_checks
+    from app.services.timeline import build_career_timeline, build_study_windows
+
+    today = date(2026, 6, 1)
+    work = [
+        {
+            "company": "FinTech Corp",
+            "job_title": "Software Engineer",
+            "employment_type": "full_time",
+            "start_date": "Jul 2024",
+            "end_date": "Present",
+            "bullets": ["Built FastAPI microservices and PostgreSQL pipelines."],
+        },
+        {
+            "company": "TechLabs",
+            "job_title": "Graduate Engineer Trainee",
+            "start_date": "Feb 2024",
+            "end_date": "May 2024",
+            "bullets": ["Assisted with CI/CD workflows and unit testing."],
+        },
+        {
+            "company": "AI Startup",
+            "job_title": "Data Science Intern",
+            "start_date": "Feb 2023",
+            "end_date": "Apr 2023",
+            "bullets": ["Built ML models in Python."],
+        },
+        {
+            "company": "WebShop",
+            "job_title": "Frontend Intern",
+            "start_date": "Jun 2022",
+            "end_date": "Aug 2022",
+            "bullets": ["Created React components."],
+        },
+    ]
+    # Old-shape education (graduation_year only -> estimated 48-month B.E. window ending June 2024)
+    education = [
+        {
+            "degree": "B.E.",
+            "field_of_study": "Computer Science and Data Structures",
+            "institution": "State Tech University",
+            "graduation_year": 2024,
+        }
+    ]
+    projects = [
+        {
+            "name": "DocSearch",
+            "description": "Semantic retrieval engine using PyTorch, Docker, and REST APIs.",
+            "technologies": ["PyTorch", "Docker", "Tailwind CSS"],
+        }
+    ]
+    certs = ["AWS Certified Cloud Practitioner"]
+
+    roles, gaps, overlaps, stats = build_career_timeline(
+        work, education=education, gap_threshold_months=3, today=today
+    )
+    study_windows, _ = build_study_windows(education, today=today)
+
+    # 1. Study window covers 2020-07 to 2024-06 -> 2023-05..2024-01 gap completely eliminated!
+    assert len(study_windows) == 1
+    assert study_windows[0].estimated is True
+    assert study_windows[0].start_ym == "2020-07"
+    assert study_windows[0].end_ym == "2024-06"
+    assert gaps == []
+
+    # 2. Internships & trainee stints are NOT counted as short stints or in core average tenure
+    assert stats.short_stints_count == 0
+    assert stats.core_role_count == 1
+    assert stats.internship_count == 2
+    assert stats.trainee_count == 1
+    assert stats.internship_months == 10  # 3m + 3m + 4m
+    assert stats.full_time_years == 2.0  # Jul 2024..Jun 2026 = 24m
+    assert stats.average_tenure_months == 24.0
+
+    # 3. Skills evidenced across ALL sections + aliases (Machine Learning <-> ML, PostgreSQL <-> Postgres)
+    listed_tech = [
+        "Python",
+        "FastAPI",
+        "Machine Learning",
+        "React",
+        "PyTorch",
+        "Data Structures",
+        "REST API",
+    ]
+    listed_tools = ["PostgreSQL", "Docker", "AWS", "CI/CD", "Tailwind CSS"]
+    ev = compute_skill_evidence(
+        technical_skills=listed_tech,
+        tools=listed_tools,
+        profile_summary="Full-stack and ML engineer.",
+        work_experience=work,
+        projects=projects,
+        certifications=certs,
+        education=education,
+    )
+    ev_map = {item.skill: item.sources for item in ev}
+    assert "experience" in ev_map["Machine Learning"]  # matched "ML" in bullet
+    assert "projects" in ev_map["PyTorch"]
+    assert "projects" in ev_map["Docker"]
+    assert "certification" in ev_map["AWS"]
+    assert "education" in ev_map["Data Structures"]
+
+    checks = run_consistency_checks(
+        roles=roles,
+        gaps=gaps,
+        overlaps=overlaps,
+        tenure_stats=stats,
+        stated_years=stats.full_time_years,
+        llm_stated_years=stats.total_years,
+        work_experience=work,
+        profile_summary="Full-stack and ML engineer.",
+        technical_skills=listed_tech,
+        tools=listed_tools,
+        projects=projects,
+        certifications=certs,
+        education=education,
+        skill_evidence=ev,
+    )
+    codes = {c.code for c in checks}
+    assert "employment_gap" not in codes
+    assert "repeated_short_stints" not in codes
+    assert "unverified_listed_skills" not in codes
+    assert "experience_mismatch" not in codes
+
+
+def test_negative_cases_still_flag_genuinely_suspicious_profiles():
+    """Real post-graduation gap, repeated short full-time stints, and unevidenced skills MUST still fire."""
+    from app.services.consistency import run_consistency_checks
+    from app.services.timeline import build_career_timeline
+
+    today = date(2026, 6, 1)
+    work = [
+        {
+            "company": "Co C",
+            "job_title": "Backend Engineer",
+            "employment_type": "full_time",
+            "start_date": "Jan 2026",
+            "end_date": "Present",
+            "bullets": ["Maintained Python services."],
+        },
+        # 8-month REAL post-graduation gap (2025-05 to 2025-12) after graduating in 2023!
+        {
+            "company": "Co B",
+            "job_title": "Internal Tools Engineer",
+            "employment_type": "full_time",
+            "start_date": "Oct 2024",
+            "end_date": "Apr 2025",  # 7 months -> short full-time stint #1
+            "bullets": ["Built internal dashboards in Python."],
+        },
+        {
+            "company": "Co A",
+            "job_title": "Software Engineer",
+            "employment_type": "full_time",
+            "start_date": "Jan 2024",
+            "end_date": "Aug 2024",  # 8 months -> short full-time stint #2
+            "bullets": ["Wrote Python scripts."],
+        },
+    ]
+    education = [{"degree": "B.Tech", "institution": "IIT", "start_year": 2019, "end_year": 2023}]
+
+    roles, gaps, overlaps, stats = build_career_timeline(
+        work, education=education, gap_threshold_months=3, today=today
+    )
+    assert len(gaps) == 1
+    assert gaps[0].duration_months == 8
+    assert stats.short_stints_count == 2
+
+    checks = run_consistency_checks(
+        roles=roles,
+        gaps=gaps,
+        overlaps=overlaps,
+        tenure_stats=stats,
+        stated_years=stats.total_years,
+        llm_stated_years=None,
+        work_experience=work,
+        profile_summary="Python developer.",
+        technical_skills=["Python", "Rust", "Haskell", "Erlang", "Scala", "Go"],
+        tools=[],
+        projects=[],
+        certifications=[],
+        education=education,
+    )
+    codes = {c.code for c in checks}
+    assert "employment_gap" in codes
+    assert "repeated_short_stints" in codes
+    assert "unverified_listed_skills" in codes
+
+
+def test_timeline_edge_cases_degrees_partial_trim_pursuing_overlapping():
+    from app.services.timeline import build_career_timeline, build_study_windows
+
+    today = date(2026, 6, 1)
+
+    # 1. Partial gap trimming: work ends Feb 2024, next starts Jan 2025 (10m raw gap);
+    # B.E. ends June 2024 -> trims Mar-Jun 2024, leaving Jul-Dec 2024 = 6m post-grad gap!
+    work_partial = [
+        {"company": "B", "job_title": "Engineer", "start_date": "Jan 2025", "end_date": "Present"},
+        {"company": "A", "job_title": "Intern", "start_date": "Nov 2023", "end_date": "Feb 2024"},
+    ]
+    edu_be = [{"degree": "B.E.", "start_year": 2020, "end_year": 2024}]
+    _, gaps, _, _ = build_career_timeline(work_partial, education=edu_be, gap_threshold_months=3, today=today)
+    assert len(gaps) == 1
+    assert gaps[0].from_ym == "2024-07"
+    assert gaps[0].to_ym == "2024-12"
+    assert gaps[0].duration_months == 6
+
+    # 2. Master's (24m) & Diploma (36m) estimated windows
+    ms_win, _ = build_study_windows([{"degree": "M.S. Computer Science", "graduation_year": 2024}], today=today)
+    assert ms_win[0].start_ym == "2022-07" and ms_win[0].end_ym == "2024-06"
+
+    dip_win, _ = build_study_windows([{"degree": "Diploma in Engineering", "graduation_year": 2023}], today=today)
+    assert dip_win[0].start_ym == "2020-07" and dip_win[0].end_ym == "2023-06"
+
+    # 3. Currently studying (open-ended window up to today)
+    curr_win, _ = build_study_windows(
+        [{"degree": "M.Tech", "start_year": 2024, "end_year": "Pursuing"}], today=today
+    )
+    assert curr_win[0].is_current is True
+    assert curr_win[0].end_ym == "Present"
+
+    # 4. Missing / invalid years do not crash
+    bad_win, bad_intervals = build_study_windows(
+        [{"degree": "B.A.", "institution": "College", "graduation_year": "invalid"}], today=today
+    )
+    assert len(bad_win) == 1
+    assert bad_win[0].start_ym is None
+    assert bad_intervals == []
+
+    # 5. Overlapping education windows merge cleanly
+    _, merged_ov = build_study_windows(
+        [
+            {"degree": "B.E.", "start_year": 2020, "end_year": 2024},
+            {"degree": "Diploma in AI", "start_year": 2021, "end_year": 2023},
+        ],
+        today=today,
+    )
+    assert len(merged_ov) == 1
+
+
+@pytest.mark.asyncio
+async def test_timeline_and_brief_api_with_cache_invalidation_and_blind_mode(
+    client, seeded_users, cleanup_records, monkeypatch
+):
+    monkeypatch.setattr(settings, "ENABLE_SEMANTIC_SEARCH", False)
+    monkeypatch.setattr(settings, "ENABLE_CANDIDATE_BRIEF", False)
+    rec_token = await _login(
+        client, seeded_users["recruiter"]["email"], seeded_users["recruiter"]["password"]
+    )
+    viewer_token = await _login(
+        client, seeded_users["viewer"]["email"], seeded_users["viewer"]["password"]
+    )
+    tag = uuid.uuid4().hex[:8]
+
+    cand_res = await client.post(
+        "/api/v1/candidates/",
+        json={
+            "full_name": f"Rohan Kulkarni {tag}",
+            "email": f"rohan.{tag}@example.com",
+            "profile_summary": "Backend engineer with ML project work.",
+            "years_experience": 1.8,
+            "primary_domain": "Software Engineering",
+            "work_experience": [
+                {
+                    "company": "CloudCo",
+                    "job_title": "Software Engineer",
+                    "employment_type": "full_time",
+                    "start_date": "Jul 2024",
+                    "end_date": "Present",
+                    "bullets": ["Built FastAPI services and PostgreSQL schemas."],
+                },
+                {
+                    "company": "LabX",
+                    "job_title": "Software Engineering Intern",
+                    "employment_type": "internship",
+                    "start_date": "Jan 2023",
+                    "end_date": "Apr 2023",
+                    "bullets": ["Trained ML classifiers in Python."],
+                },
+            ],
+            "education": [
+                {
+                    "degree": "B.E.",
+                    "field_of_study": "Computer Engineering",
+                    "institution": f"Secret Institute {tag}",
+                    "start_year": 2020,
+                    "end_year": 2024,
+                    "graduation_year": 2024,
+                }
+            ],
+            "projects": [
+                {
+                    "name": "QueryBot",
+                    "description": "Built RAG assistant with Docker and React.",
+                    "technologies": ["Docker", "React"],
+                }
+            ],
+            "technical_skills": ["Python", "FastAPI", "Machine Learning", "React"],
+            "tools": ["PostgreSQL", "Docker"],
+            "allow_duplicate": True,
+        },
+        headers=_auth(rec_token),
+    )
+    assert cand_res.status_code == 201, cand_res.text
+    cid = cand_res.json()["id"]
+    cleanup_records["candidates"].append(uuid.UUID(cid))
+
+    # 1. /timeline returns study_windows, skill_evidence, zero false flags, and masks institution in blind mode
+    tl = await client.get(f"/api/v1/candidates/{cid}/timeline", headers=_auth(viewer_token))
+    assert tl.status_code == 200, tl.text
+    tl_data = tl.json()
+    assert len(tl_data["study_windows"]) == 1
+    assert tl_data["study_windows"][0]["institution"] == f"Secret Institute {tag}"
+    assert tl_data["gaps"] == []
+    assert tl_data["tenure_stats"]["short_stints_count"] == 0
+    assert tl_data["tenure_stats"]["internship_months"] == 4
+    ev_map = {e["skill"]: e["sources"] for e in tl_data["skill_evidence"]}
+    assert "projects" in ev_map["Docker"]
+    assert "experience" in ev_map["Machine Learning"]
+
+    tl_blind = await client.get(
+        f"/api/v1/candidates/{cid}/timeline?blind=true", headers=_auth(viewer_token)
+    )
+    assert tl_blind.status_code == 200
+    assert tl_blind.json()["study_windows"][0]["institution"] == "[Institution Redacted]"
+
+    # 2. /brief shows "full-time (+ 4 months internships)" and caches by source_hash
+    brief1 = await client.get(f"/api/v1/candidates/{cid}/brief", headers=_auth(viewer_token))
+    assert brief1.status_code == 200, brief1.text
+    b1 = brief1.json()
+    assert "full-time (+ 4 months internships)" in b1["summary"]
+    assert b1["verify_items"] == []
+    hash1 = b1["source_hash"]
+
+    # Updating projects invalidates source_hash and regenerates brief automatically
+    upd = await client.put(
+        f"/api/v1/candidates/{cid}",
+        json={
+            "projects": [
+                {
+                    "name": "QueryBot v2",
+                    "description": "Upgraded RAG assistant with Docker, React, and Redis.",
+                    "technologies": ["Docker", "React", "Redis"],
+                }
+            ]
+        },
+        headers=_auth(rec_token),
+    )
+    assert upd.status_code == 200
+
+    brief2 = await client.get(f"/api/v1/candidates/{cid}/brief", headers=_auth(viewer_token))
+    assert brief2.status_code == 200
+    assert brief2.json()["source_hash"] != hash1
+    assert brief2.json()["cached"] is False

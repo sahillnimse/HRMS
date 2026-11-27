@@ -66,7 +66,7 @@ from app.services.brief import get_or_generate_candidate_brief
 from app.services.exports import build_shortlist_pack_pdf, build_shortlist_xlsx
 from app.services.matching import compute_jd_match
 from app.services.skills import load_skill_alias_map
-from app.services.timeline import build_career_timeline
+from app.services.timeline import build_career_timeline, build_study_windows
 
 jobs_router = APIRouter()
 applications_router = APIRouter()
@@ -308,12 +308,19 @@ async def export_job_shortlist_pack_pdf(
         cand = cands_map.get(cid)
         if not cand:
             continue
-        brief = await get_or_generate_candidate_brief(db, cand, force_regenerate=False, blind=blind)
-        roles, gaps, overlaps, stats = build_career_timeline(cand.work_experience or [])
+        brief = await get_or_generate_candidate_brief(
+            db, cand, force_regenerate=False, blind=blind, alias_map=alias_map
+        )
+        roles, gaps, overlaps, stats = build_career_timeline(
+            cand.work_experience or [],
+            education=cand.education or [],
+        )
+        study_windows, _ = build_study_windows(cand.education or [], blind=blind)
         timeline = CandidateTimelineResponse(
             candidate_id=cand.id,
             gap_threshold_months=app_settings.TIMELINE_GAP_THRESHOLD_MONTHS,
             roles=roles,
+            study_windows=study_windows,
             gaps=gaps,
             overlaps=overlaps,
             tenure_stats=stats,

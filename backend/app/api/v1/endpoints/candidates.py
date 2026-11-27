@@ -68,10 +68,11 @@ from app.schemas.pipeline import (
 )
 from app.services.audit import record_audit, redact_ctc_for_role, redact_for_blind_screening
 from app.services.brief import get_or_generate_candidate_brief
-from app.services.consistency import run_consistency_checks
+from app.services.consistency import compute_skill_evidence, run_consistency_checks
 from app.services.exports import build_candidate_pdf, build_shortlist_xlsx
 from app.services.file_storage import storage
-from app.services.timeline import build_career_timeline
+from app.services.skills import load_skill_alias_map
+from app.services.timeline import build_career_timeline, build_study_windows
 
 router = APIRouter()
 
@@ -530,10 +531,11 @@ async def get_candidate_timeline_endpoint(
     gap_months: Optional[int] = Query(
         None, ge=1, le=36, description="Gap threshold in months (defaults to TIMELINE_GAP_THRESHOLD_MONTHS)"
     ),
+    blind: bool = Query(False, description="Mask institution names in study windows for blind screening"),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_role(*READ_ROLES)),
 ):
-    """Return normalized career timeline, gaps, overlaps, tenure stats, and neutral consistency checks."""
+    """Return normalized career timeline, study windows, gaps, overlaps, tenure stats, skill evidence, and neutral consistency checks."""
     candidate = await get_candidate_by_id(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
@@ -543,14 +545,28 @@ async def get_candidate_timeline_endpoint(
     effective_gap = gap_months if gap_months is not None else app_settings.TIMELINE_GAP_THRESHOLD_MONTHS
     roles, gaps, overlaps, stats = build_career_timeline(
         candidate.work_experience or [],
+        education=candidate.education or [],
         gap_threshold_months=effective_gap,
     )
+    study_windows, _ = build_study_windows(candidate.education or [], blind=blind)
     llm_years = None
     if isinstance(candidate.raw_parsed_data, dict):
         raw_llm = candidate.raw_parsed_data.get("_llm_years_experience")
         if isinstance(raw_llm, (int, float)):
             llm_years = float(raw_llm)
 
+    alias_map = await load_skill_alias_map(db)
+    projects = getattr(candidate, "projects", None) or []
+    skill_evidence = compute_skill_evidence(
+        technical_skills=candidate.technical_skills or [],
+        tools=candidate.tools or [],
+        profile_summary=candidate.profile_summary or "",
+        work_experience=candidate.work_experience or [],
+        projects=projects,
+        certifications=candidate.certifications or [],
+        education=candidate.education or [],
+        alias_map=alias_map,
+    )
     checks = run_consistency_checks(
         roles=roles,
         gaps=gaps,
@@ -562,15 +578,22 @@ async def get_candidate_timeline_endpoint(
         profile_summary=candidate.profile_summary or "",
         technical_skills=candidate.technical_skills or [],
         tools=candidate.tools or [],
+        projects=projects,
+        certifications=candidate.certifications or [],
+        education=candidate.education or [],
+        alias_map=alias_map,
+        skill_evidence=skill_evidence,
     )
     return CandidateTimelineResponse(
         candidate_id=candidate.id,
         gap_threshold_months=effective_gap,
         roles=roles,
+        study_windows=study_windows,
         gaps=gaps,
         overlaps=overlaps,
         tenure_stats=stats,
         consistency_checks=checks,
+        skill_evidence=skill_evidence,
     )
 
 
