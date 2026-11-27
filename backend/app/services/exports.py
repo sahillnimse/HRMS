@@ -16,6 +16,20 @@ from reportlab.platypus import HRFlowable, PageBreak, Paragraph, SimpleDocTempla
 from app.models.user import UserRole
 from app.schemas.candidate import CandidateResponse
 from app.services.audit import blind_candidate_label, redact_ctc_for_role, redact_for_blind_screening
+from app.services.timeline import build_career_timeline
+
+_EMP_TYPE_LABELS = {
+    "internship": "Internship",
+    "trainee": "Trainee",
+    "contract": "Contract",
+    "freelance": "Freelance",
+    "part_time": "Part-time",
+}
+
+
+def _emp_badge_text(emp_type: Any) -> str:
+    label = _EMP_TYPE_LABELS.get(str(emp_type or "").strip().lower())
+    return f" [{label}]" if label else ""
 
 
 def _safe_p(text_val: Any, max_len: int = 450) -> str:
@@ -114,9 +128,21 @@ def build_candidate_pdf(
     )
     story.append(Paragraph(_safe_p(data.full_name, 120), title_style))
 
+    _, _, _, tl_stats = build_career_timeline(
+        data.work_experience or [],
+        education=data.education or [],
+    )
+    if tl_stats.internship_months > 0:
+        exp_label = (
+            f"{tl_stats.full_time_years:.1f} yrs full-time "
+            f"(+ {tl_stats.internship_months}m internships)"
+        )
+    else:
+        exp_label = f"{data.years_experience:.1f} yrs experience"
+
     meta_parts = [
         data.primary_domain,
-        f"{data.years_experience:.1f} yrs experience",
+        exp_label,
     ]
     if data.city:
         meta_parts.append(data.city)
@@ -200,8 +226,11 @@ def build_candidate_pdf(
                 continue
             title = item.get("job_title") or "Role"
             company = item.get("company") or ""
+            emp_tag = _emp_badge_text(item.get("employment_type"))
             dates = f"{item.get('start_date') or ''} – {item.get('end_date') or 'Present'}".strip(" –")
             line = f"<b>{_safe_p(title, 80)}</b>"
+            if emp_tag:
+                line += f' <font color="#4F46E5"><b>{escape(emp_tag)}</b></font>'
             if company:
                 line += f"  ·  {_safe_p(company, 80)}"
             if dates:
@@ -213,6 +242,23 @@ def build_candidate_pdf(
                     story.append(Paragraph(f"• {_safe_p(b, 175)}", small_style))
             story.append(Spacer(1, 3))
 
+    # Projects (compact, max 3 projects)
+    if data.projects:
+        story.append(Paragraph("PROJECTS", sec_style))
+        for proj in (data.projects or [])[:3]:
+            if not isinstance(proj, dict):
+                continue
+            p_name = proj.get("name") or "Project"
+            p_techs = [str(t) for t in (proj.get("technologies") or [])[:6] if t]
+            p_desc = proj.get("description") or ""
+            p_line = f"<b>{_safe_p(p_name, 80)}</b>"
+            if p_techs:
+                p_line += f'  <font color="#64748B">({_safe_p(", ".join(p_techs), 100)})</font>'
+            story.append(Paragraph(p_line, body_style))
+            if p_desc:
+                story.append(Paragraph(f"• {_safe_p(p_desc, 170)}", small_style))
+            story.append(Spacer(1, 2))
+
     # Education
     if data.education:
         story.append(Paragraph("EDUCATION", sec_style))
@@ -220,13 +266,22 @@ def build_candidate_pdf(
             if not isinstance(ed, dict):
                 continue
             deg = ed.get("degree") or "Degree"
+            fos = ed.get("field_of_study") or ""
             inst = "[Institution Redacted]" if blind else (ed.get("institution") or "")
-            yr = ed.get("graduation_year")
-            edu_line = f"<b>{_safe_p(deg, 90)}</b>"
+            s_yr = ed.get("start_year")
+            e_yr = ed.get("end_year") or ed.get("graduation_year")
+            is_curr = bool(ed.get("is_current"))
+            deg_full = f"{deg} ({fos})" if fos else str(deg)
+            edu_line = f"<b>{_safe_p(deg_full, 100)}</b>"
             if inst:
                 edu_line += f" — {_safe_p(inst, 90)}"
-            if yr:
-                edu_line += f" ({yr})"
+            if is_curr:
+                yr_txt = f"{s_yr}–Present" if s_yr else (f"Expected {e_yr}" if e_yr else "Pursuing")
+                edu_line += f" ({yr_txt})"
+            elif s_yr and e_yr:
+                edu_line += f" ({s_yr}–{e_yr})"
+            elif e_yr:
+                edu_line += f" ({e_yr})"
             story.append(Paragraph(edu_line, body_style))
 
     # Certifications / Languages
@@ -606,8 +661,15 @@ def build_shortlist_pack_pdf(
         story.append(Paragraph("CAREER TIMELINE SUMMARY", sec_style))
         if timeline:
             ts = timeline.tenure_stats
+            if getattr(ts, "internship_months", 0) > 0:
+                exp_summary = (
+                    f"<b>{ts.full_time_years:.1f} yrs</b> full-time "
+                    f"(+ <b>{ts.internship_months}m</b> internships)"
+                )
+            else:
+                exp_summary = f"<b>{ts.total_years:.1f} yrs</b> computed across <b>{ts.role_count}</b> roles"
             t_summary = (
-                f"<b>{ts.total_years:.1f} yrs</b> computed across <b>{ts.role_count}</b> roles "
+                f"{exp_summary} "
                 f"· Avg tenure: <b>{ts.average_tenure_months:.0f} mos</b> "
                 f"· Jobs (last 5 yrs): <b>{ts.jobs_last_5_years}</b>"
             )
@@ -619,16 +681,17 @@ def build_shortlist_pack_pdf(
             for r in list(timeline.roles)[:4]:
                 dates = f"{r.start_ym or r.raw_start or '?'} – {r.end_ym or r.raw_end or '?'}"
                 dur = f" ({r.duration_months}m)" if r.duration_months else ""
+                emp_tag = _emp_badge_text(getattr(r, "employment_type", None))
                 story.append(
                     Paragraph(
-                        f"• <b>{_safe_p(r.job_title, 70)}</b> at {_safe_p(r.company, 65)} "
+                        f"• <b>{_safe_p(r.job_title, 70)}</b>{escape(emp_tag)} at {_safe_p(r.company, 65)} "
                         f'<font color="#64748B">[{escape(dates)}{dur}]</font>',
                         small_style,
                     )
                 )
 
-        # 4. Top Skills & Education (compact)
-        story.append(Paragraph("TOP SKILLS & CREDENTIALS", sec_style))
+        # 4. Top Skills, Projects & Education (compact)
+        story.append(Paragraph("TOP SKILLS, PROJECTS & CREDENTIALS", sec_style))
         if cand.technical_skills:
             story.append(
                 Paragraph(
@@ -643,13 +706,26 @@ def build_shortlist_pack_pdf(
                     small_style,
                 )
             )
+        if cand.projects:
+            proj_bits = []
+            for p in (cand.projects or [])[:3]:
+                if isinstance(p, dict) and p.get("name"):
+                    techs = ", ".join(str(t) for t in (p.get("technologies") or [])[:4] if t)
+                    proj_bits.append(f"{p['name']} ({techs})" if techs else str(p["name"]))
+            if proj_bits:
+                story.append(
+                    Paragraph(f"<b>Projects:</b> {_safe_p('; '.join(proj_bits), 200)}", small_style)
+                )
         if cand.education:
             edu_bits = []
             for ed in (cand.education or [])[:2]:
                 if isinstance(ed, dict):
                     deg = ed.get("degree") or "Degree"
+                    s_yr = ed.get("start_year")
+                    e_yr = ed.get("end_year") or ed.get("graduation_year")
+                    yr_tag = f" {s_yr}–{e_yr}" if (s_yr and e_yr) else (f" {e_yr}" if e_yr else "")
                     inst = "[Institution Redacted]" if blind else (ed.get("institution") or "")
-                    edu_bits.append(f"{deg} ({inst})" if inst else str(deg))
+                    edu_bits.append(f"{deg}{yr_tag} ({inst})" if inst else f"{deg}{yr_tag}")
             if edu_bits:
                 story.append(Paragraph(f"<b>Education:</b> {_safe_p('; '.join(edu_bits), 180)}", small_style))
 

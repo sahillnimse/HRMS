@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  AlertTriangle,
+  ArrowRight,
   Briefcase,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   Code2,
@@ -21,7 +24,7 @@ import { useCandidates } from '@/hooks/useCandidates'
 import { useAuth } from '@/contexts/AuthContext'
 import { useBlindMode } from '@/contexts/BlindModeContext'
 import { useAddToast } from '@/components/ui/Toast'
-import { downloadBlobFile } from '@/lib/api'
+import { api, downloadBlobFile } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { CandidateCard } from '@/components/CandidateCard'
 import { CandidateTable } from '@/components/CandidateTable'
@@ -33,7 +36,7 @@ import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { cn, formatYears } from '@/lib/utils'
-import type { CandidateSearchItem } from '@/types'
+import type { CandidateSearchItem, InterviewItem, StuckCandidatesAnalytics } from '@/types'
 
 const PRESET_DOMAINS = [
   'Software Engineering',
@@ -77,6 +80,28 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<CandidateSearchItem | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [exportingXlsx, setExportingXlsx] = useState(false)
+  const [upcomingInterviews, setUpcomingInterviews] = useState<InterviewItem[]>([])
+  const [stuckSummary, setStuckSummary] = useState<StuckCandidatesAnalytics | null>(null)
+
+  useEffect(() => {
+    let active = true
+    const params = blindMode ? { blind: true } : undefined
+    Promise.all([
+      api.get<InterviewItem[]>('/interviews/mine', { params }).catch(() => ({ data: [] as InterviewItem[] })),
+      api.get<StuckCandidatesAnalytics>('/analytics/stuck', { params }).catch(() => ({ data: null })),
+    ]).then(([ivRes, stuckRes]) => {
+      if (!active) return
+      const now = Date.now()
+      const upcoming = (ivRes.data || []).filter(
+        (iv) => iv.status === 'scheduled' && new Date(iv.scheduled_at).getTime() >= now - 3_600_000,
+      )
+      setUpcomingInterviews(upcoming)
+      setStuckSummary(stuckRes.data)
+    })
+    return () => {
+      active = false
+    }
+  }, [blindMode])
 
   // Debounce search text
   useEffect(() => {
@@ -300,6 +325,67 @@ export default function DashboardPage() {
           )
         })}
       </div>
+
+      {/* Compact Action Strip: Upcoming Interviews & Stuck SLA Alerts */}
+      {(upcomingInterviews.length > 0 || (stuckSummary?.total_stuck ?? 0) > 0) && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 animate-fade-in">
+          {upcomingInterviews.length > 0 && (
+            <Link
+              to="/interviews"
+              className="group flex items-center justify-between gap-3 rounded-2xl border border-brand-200/80 bg-gradient-to-r from-brand-50/70 to-white px-4 py-3 shadow-sm transition hover:border-brand-300 hover:shadow-card"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white">
+                  <Calendar size={16} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-900">
+                    {upcomingInterviews.length} Upcoming Interview
+                    {upcomingInterviews.length === 1 ? '' : 's'}
+                  </p>
+                  <p className="truncate text-xs text-slate-600">
+                    Next: {upcomingInterviews[0].round_name}
+                    {upcomingInterviews[0].candidate_name
+                      ? ` · ${upcomingInterviews[0].candidate_name}`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+              <ArrowRight
+                size={15}
+                className="shrink-0 text-brand-600 transition-transform group-hover:translate-x-0.5"
+              />
+            </Link>
+          )}
+
+          {(stuckSummary?.total_stuck ?? 0) > 0 && (
+            <Link
+              to="/analytics"
+              className="group flex items-center justify-between gap-3 rounded-2xl border border-coral-200/80 bg-gradient-to-r from-coral-50/70 to-white px-4 py-3 shadow-sm transition hover:border-coral-300 hover:shadow-card"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-coral-500 text-white">
+                  <AlertTriangle size={16} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-900">
+                    {stuckSummary!.total_stuck} Stuck Candidate
+                    {stuckSummary!.total_stuck === 1 ? '' : 's'} Past Stage SLA
+                  </p>
+                  <p className="truncate text-xs text-slate-600">
+                    Longest: {stuckSummary!.items[0]?.candidate_name} ({stuckSummary!.items[0]?.days_in_stage.toFixed(0)}d in{' '}
+                    {stuckSummary!.items[0]?.stage})
+                  </p>
+                </div>
+              </div>
+              <ArrowRight
+                size={15}
+                className="shrink-0 text-coral-600 transition-transform group-hover:translate-x-0.5"
+              />
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Talent Pool Breakdown (shown when candidates exist) */}
       {stats && stats.total > 0 && (

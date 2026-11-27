@@ -56,7 +56,9 @@ from app.schemas.candidate import (
     CandidateStats,
     CandidateUpdate,
     SectionRemapResponse,
+    _strip_internal_resume_text,
 )
+from app.services.bulk_parse import parse_resume_pipeline
 from app.services.remap import remap_candidate_sections
 from app.schemas.clarity import CandidateBriefResponse, CandidateTimelineResponse
 from app.schemas.matching import CandidateCompareResponse, CandidateSearchResponse
@@ -696,6 +698,71 @@ async def get_candidate_activity_endpoint(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     return await get_candidate_activity(db, candidate_id)
+
+
+@router.post("/{candidate_id}/reparse")
+async def reparse_candidate_resume_endpoint(
+    candidate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(*WRITE_ROLES)),
+):
+    """
+    Re-parse a candidate's attached saved resume file (with OCR fallback + structured AI parser)
+    and return a preview payload WITHOUT mutating the database, so the recruiter can review
+    and save in Edit Details.
+    """
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if not candidate.resume_file_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Candidate does not have a saved resume file attached.",
+        )
+
+    rf = (
+        await db.execute(select(ResumeFile).where(ResumeFile.id == candidate.resume_file_id))
+    ).scalar_one_or_none()
+    if not rf:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved resume file not found")
+
+    try:
+        file_bytes = await storage.read_file(rf.stored_filename)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Saved resume file is missing from storage.",
+        )
+
+    try:
+        flat, _dup, ocr_used = await parse_resume_pipeline(
+            db,
+            file_bytes=file_bytes,
+            filename=rf.original_filename,
+            content_type=rf.content_type or "",
+            stored_filename=rf.stored_filename,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI re-parsing failed: {str(exc)}",
+        )
+
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="reparse_preview",
+        entity="candidate",
+        entity_id=candidate.id,
+        metadata={"ocr_used": ocr_used},
+    )
+    return {
+        "candidate_id": str(candidate.id),
+        "ocr_used": ocr_used,
+        "parsed_data": _strip_internal_resume_text(flat),
+    }
 
 
 @router.put("/{candidate_id}", response_model=CandidateResponse)

@@ -674,3 +674,234 @@ async def test_timeline_and_brief_api_with_cache_invalidation_and_blind_mode(
     assert brief2.status_code == 200
     assert brief2.json()["source_hash"] != hash1
     assert brief2.json()["cached"] is False
+
+
+# ---------------------------------------------------------------------------
+# Quick Wins tests: PDF exports (projects + employment_type), opt-in stage auto-email, single-candidate re-parse
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_exports_render_projects_and_employment_types_with_blind_and_viewer_safety():
+    from datetime import datetime, timezone
+    from app.models.user import UserRole
+    from app.schemas.candidate import CandidateResponse
+    from app.services.exports import build_candidate_pdf
+
+    now = datetime.now(timezone.utc)
+    cand = CandidateResponse(
+        id=uuid.uuid4(),
+        full_name="Meera Joshi",
+        email="meera@example.com",
+        phone="+91-9876543210",
+        city="Pune",
+        profile_summary="Full-stack engineer with internship and project portfolio.",
+        years_experience=1.5,
+        primary_domain="Software Engineering",
+        work_experience=[
+            {
+                "company": "AlphaTech",
+                "job_title": "Software Engineer",
+                "employment_type": "full_time",
+                "start_date": "Jul 2024",
+                "end_date": "Present",
+                "bullets": ["Built FastAPI APIs."],
+            },
+            {
+                "company": "BetaLab",
+                "job_title": "ML Intern",
+                "employment_type": "internship",
+                "start_date": "Jan 2024",
+                "end_date": "Apr 2024",
+                "bullets": ["Trained NLP models."],
+            },
+        ],
+        education=[
+            {
+                "degree": "B.E.",
+                "field_of_study": "Computer Engineering",
+                "institution": "Secret College Name",
+                "start_year": 2020,
+                "end_year": 2024,
+                "graduation_year": 2024,
+            }
+        ],
+        projects=[
+            {
+                "name": "DocSearch Engine",
+                "description": "Semantic PDF indexer with pgvector and Docker.",
+                "technologies": ["Python", "Docker", "PostgreSQL"],
+            }
+        ],
+        technical_skills=["Python", "FastAPI"],
+        tools=["Docker", "PostgreSQL"],
+        soft_skills=[],
+        hobbies_interests=[],
+        languages=["English"],
+        certifications=[],
+        current_ctc=1200000,
+        expected_ctc=1600000,
+        ctc_currency="INR",
+        raw_parsed_data={},
+        is_duplicate_flagged=False,
+        created_at=now,
+        updated_at=now,
+    )
+
+    pdf_normal = build_candidate_pdf(cand, role=UserRole.recruiter, blind=False)
+    assert pdf_normal.startswith(b"%PDF-") and len(pdf_normal) > 1000
+
+    pdf_blind_viewer = build_candidate_pdf(cand, role=UserRole.viewer, blind=True)
+    assert pdf_blind_viewer.startswith(b"%PDF-") and len(pdf_blind_viewer) > 1000
+
+
+@pytest.mark.asyncio
+async def test_opt_in_stage_auto_email_and_single_candidate_reparse(
+    client, seeded_users, cleanup_records, db_session_factory, monkeypatch
+):
+    from app.models.candidate import ResumeFile, ResumeFileStatus
+    from app.services.email_sender import ConsoleEmailSender
+    from app.services.file_storage import storage
+
+    monkeypatch.setattr(settings, "ENABLE_SEMANTIC_SEARCH", False)
+    admin_token = await _login(client, seeded_users["admin"]["email"], seeded_users["admin"]["password"])
+    rec_token = await _login(
+        client, seeded_users["recruiter"]["email"], seeded_users["recruiter"]["password"]
+    )
+    viewer_token = await _login(
+        client, seeded_users["viewer"]["email"], seeded_users["viewer"]["password"]
+    )
+    tag = uuid.uuid4().hex[:8]
+
+    sent_emails: list[dict] = []
+
+    class CaptureSender(ConsoleEmailSender):
+        async def send_email(self, *, to_email: str, subject: str, body: str) -> None:
+            sent_emails.append({"to": to_email, "subject": subject, "body": body})
+
+    monkeypatch.setattr("app.crud.workflow.default_email_sender", CaptureSender())
+
+    # Save a dummy resume file for re-parse testing
+    file_meta = await storage.save_file(
+        file_bytes=b"Dummy CV content",
+        original_filename=f"reparse-{tag}.pdf",
+        content_type="application/pdf",
+    )
+    async with db_session_factory() as db:
+        rf = ResumeFile(
+            original_filename=file_meta["original_filename"],
+            stored_filename=file_meta["stored_filename"],
+            file_path=file_meta["file_path"],
+            file_size=file_meta["file_size"],
+            content_type=file_meta["content_type"],
+            status=ResumeFileStatus.pending.value,
+        )
+        db.add(rf)
+        await db.commit()
+        await db.refresh(rf)
+        rf_id = rf.id
+
+    cand_res = await client.post(
+        "/api/v1/candidates/",
+        json={
+            "resume_file_id": str(rf_id),
+            "full_name": f"Nikhil Patil {tag}",
+            "email": f"nikhil.{tag}@example.com",
+            "profile_summary": "Backend engineer.",
+            "years_experience": 2.0,
+            "primary_domain": "Software Engineering",
+            "technical_skills": ["Python"],
+            "allow_duplicate": True,
+        },
+        headers=_auth(rec_token),
+    )
+    assert cand_res.status_code == 201, cand_res.text
+    cid = cand_res.json()["id"]
+    cleanup_records["candidates"].append(uuid.UUID(cid))
+
+    # 1. Single-candidate re-parse preview: viewer gets 403; recruiter gets preview without DB mutation
+    viewer_reparse = await client.post(f"/api/v1/candidates/{cid}/reparse", headers=_auth(viewer_token))
+    assert viewer_reparse.status_code == 403
+
+    async def _fake_pipeline(db, **kwargs):
+        from app.schemas.candidate import DuplicateInfo
+
+        return (
+            {
+                "full_name": f"Nikhil Patil {tag}",
+                "profile_summary": "Updated summary from re-parse.",
+                "years_experience": 2.0,
+                "primary_domain": "Software Engineering",
+                "projects": [{"name": "Reparsed App", "description": "Built APIs.", "technologies": ["FastAPI"]}],
+                "raw_parsed_data": {"_resume_text": "SECRET RAW TEXT"},
+            },
+            DuplicateInfo(is_duplicate=False, matches=[]),
+            False,
+        )
+
+    monkeypatch.setattr("app.api.v1.endpoints.candidates.parse_resume_pipeline", _fake_pipeline)
+    reparse_res = await client.post(f"/api/v1/candidates/{cid}/reparse", headers=_auth(rec_token))
+    assert reparse_res.status_code == 200, reparse_res.text
+    rp = reparse_res.json()
+    assert rp["parsed_data"]["projects"][0]["name"] == "Reparsed App"
+    assert "_resume_text" not in str(rp)
+    # Confirm DB was NOT mutated by preview
+    unchanged = await client.get(f"/api/v1/candidates/{cid}", headers=_auth(rec_token))
+    assert unchanged.json()["projects"] == []
+
+    # 2. Opt-in stage auto-email: OFF by default; fires ONLY when admin enables auto_send=True on non-rejected stage
+    job_res = await client.post(
+        "/api/v1/jobs/",
+        json={
+            "title": f"Platform Eng {tag}",
+            "department": "Eng",
+            "location": "Remote",
+            "description": "Python",
+            "required_skills": ["Python"],
+            "status": "open",
+        },
+        headers=_auth(rec_token),
+    )
+    jid = job_res.json()["id"]
+    cleanup_records["jobs"].append(uuid.UUID(jid))
+
+    app_res = await client.post(
+        "/api/v1/applications/",
+        json={"candidate_id": cid, "job_id": jid, "stage": "applied"},
+        headers=_auth(rec_token),
+    )
+    app_id = app_res.json()["id"]
+
+    # Create an admin opt-in auto_send template for `screened` stage
+    tpl_res = await client.post(
+        "/api/v1/email-templates/",
+        json={
+            "key": f"screened_welcome_{tag}",
+            "subject": "Screening update for {{job_title}}",
+            "body": "Hi {{candidate_name}}, you moved to screened.",
+            "stage_trigger": "screened",
+            "auto_send": True,
+        },
+        headers=_auth(admin_token),
+    )
+    assert tpl_res.status_code == 201, tpl_res.text
+    tpl_id = tpl_res.json()["id"]
+    try:
+        mv_screened = await client.patch(
+            f"/api/v1/applications/{app_id}/stage",
+            json={"stage": "screened"},
+            headers=_auth(rec_token),
+        )
+        assert mv_screened.status_code == 200
+        assert len(sent_emails) == 1
+        assert f"Platform Eng {tag}" in sent_emails[0]["subject"]
+
+        # Moving to rejected NEVER auto-sends any email
+        mv_rej = await client.patch(
+            f"/api/v1/applications/{app_id}/stage",
+            json={"stage": "rejected"},
+            headers=_auth(rec_token),
+        )
+        assert mv_rej.status_code == 200
+        assert len(sent_emails) == 1  # unchanged!
+    finally:
+        await client.delete(f"/api/v1/email-templates/{tpl_id}", headers=_auth(admin_token))

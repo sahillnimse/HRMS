@@ -373,6 +373,21 @@ async def move_application_stage(
     await db.commit()
     await db.refresh(app_obj)
 
+    if from_stage != to_stage.value and to_stage != ApplicationStage.rejected:
+        try:
+            from app.crud.workflow import dispatch_stage_auto_emails
+
+            await dispatch_stage_auto_emails(
+                db,
+                candidate_id=app_obj.candidate_id,
+                application_id=app_obj.id,
+                to_stage=to_stage.value,
+                actor_id=actor_id,
+            )
+        except Exception:
+            # Opt-in email dispatch must never fail a stage transition
+            pass
+
     return ApplicationResponse(
         id=app_obj.id,
         candidate_id=app_obj.candidate_id,

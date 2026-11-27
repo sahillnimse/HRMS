@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -838,6 +838,52 @@ async def list_candidate_emails(
         )
         for r in rows
     ]
+
+
+async def dispatch_stage_auto_emails(
+    db: AsyncSession,
+    *,
+    candidate_id: UUID,
+    application_id: UUID,
+    to_stage: str,
+    actor_id: Optional[UUID],
+) -> List[EmailLogResponse]:
+    """
+    Dispatch any admin-enabled (`auto_send=True`) email templates matching `to_stage`.
+    SAFETY: Rejection emails NEVER auto-send, regardless of template configuration.
+    """
+    stage_norm = (to_stage or "").strip().lower()
+    if not stage_norm or stage_norm == ApplicationStage.rejected.value:
+        return []
+
+    templates = (
+        await db.execute(
+            select(EmailTemplate).where(
+                func.lower(EmailTemplate.stage_trigger) == stage_norm,
+                EmailTemplate.auto_send.is_(True),
+            )
+        )
+    ).scalars().all()
+    if not templates:
+        return []
+
+    dispatched: List[EmailLogResponse] = []
+    for tpl in templates:
+        if "reject" in (tpl.key or "").lower():
+            continue
+        sent, _err = await send_candidate_email(
+            db,
+            EmailSendRequest(
+                candidate_id=candidate_id,
+                application_id=application_id,
+                template_key=tpl.key,
+                confirm_rejection=False,
+            ),
+            actor_id=actor_id or candidate_id,
+        )
+        if sent is not None:
+            dispatched.append(sent)
+    return dispatched
 
 
 # ---------------------------------------------------------------------------

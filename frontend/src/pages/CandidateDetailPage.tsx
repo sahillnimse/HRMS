@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Network,
+  RefreshCw,
   Trash2,
   X,
 } from 'lucide-react'
@@ -39,6 +40,7 @@ import type {
   CandidateResponse,
   CandidateTimeline,
   CandidateUpdate,
+  ParsedResumeData,
   SkillEvidenceItem,
 } from '@/types'
 
@@ -58,6 +60,8 @@ export default function CandidateDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [openingCv, setOpeningCv] = useState(false)
+  const [reparsing, setReparsing] = useState(false)
+  const [reparsedDraft, setReparsedDraft] = useState<ParsedResumeData | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
 
@@ -127,10 +131,37 @@ export default function CandidateDetailPage() {
     const updated = await updateCandidate(id, payload)
     if (updated) {
       addToast('Candidate profile updated', 'success')
+      setReparsedDraft(null)
       setActivityRefresh((n) => n + 1)
       setTab('overview')
     } else {
       addToast('Could not update candidate profile', 'error')
+    }
+  }
+
+  const handleReparse = async () => {
+    if (!id || !selected?.resume_file_id) return
+    setReparsing(true)
+    try {
+      const res = await api.post<{ parsed_data: ParsedResumeData; ocr_used: boolean }>(
+        `/candidates/${id}/reparse`,
+      )
+      setReparsedDraft({
+        ...res.data.parsed_data,
+        // Preserve existing non-parsed HR metadata (source, consent, CTC if not in CV)
+        source: selected.source,
+        consent_given_at: selected.consent_given_at,
+        notice_period_days: res.data.parsed_data.notice_period_days ?? selected.notice_period_days,
+        current_ctc: res.data.parsed_data.current_ctc ?? selected.current_ctc,
+        expected_ctc: res.data.parsed_data.expected_ctc ?? selected.expected_ctc,
+        ctc_currency: res.data.parsed_data.ctc_currency ?? selected.ctc_currency,
+      })
+      setTab('edit')
+      addToast('CV re-parsed — review the updated sections and click Save Changes to apply.', 'info')
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Failed to re-parse saved resume'), 'error')
+    } finally {
+      setReparsing(false)
     }
   }
 
@@ -259,6 +290,12 @@ export default function CandidateDetailPage() {
                 View Saved CV
               </Button>
             )}
+            {canWrite && !blindMode && selected.resume_file_id && (
+              <Button variant="outline" size="sm" onClick={() => void handleReparse()} loading={reparsing}>
+                <RefreshCw size={14} />
+                Re-parse CV
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={exportPdf} loading={exportingPdf}>
               <Download size={15} />
               {blindMode ? 'Blind PDF' : 'Export PDF'}
@@ -354,15 +391,38 @@ export default function CandidateDetailPage() {
       )}
 
       {tab === 'edit' && (
-        <EditableReview
-          parsedData={selected}
-          resumeFileId={selected.resume_file_id}
-          onSave={handleUpdate}
-          onCancel={() => setTab('overview')}
-          saving={loading}
-          submitLabel="Save Changes"
-          cancelLabel="Cancel"
-        />
+        <div className="space-y-4">
+          {reparsedDraft && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-4 py-3 text-xs text-brand-900 animate-fade-in">
+              <span>
+                <strong>Re-parsed CV preview loaded.</strong> Nothing has been saved yet — review
+                education dates, role types, and projects below, then click{' '}
+                <strong>Save Changes</strong> (or Cancel to discard).
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReparsedDraft(null)}
+                className="h-7 text-xs"
+              >
+                Revert to Saved
+              </Button>
+            </div>
+          )}
+          <EditableReview
+            key={reparsedDraft ? 'reparsed' : selected.updated_at}
+            parsedData={reparsedDraft ?? selected}
+            resumeFileId={selected.resume_file_id}
+            onSave={handleUpdate}
+            onCancel={() => {
+              setReparsedDraft(null)
+              setTab('overview')
+            }}
+            saving={loading}
+            submitLabel="Save Changes"
+            cancelLabel="Cancel"
+          />
+        </div>
       )}
 
       {/* Add to Job Modal */}
