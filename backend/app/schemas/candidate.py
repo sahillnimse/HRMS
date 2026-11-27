@@ -50,6 +50,7 @@ class CandidateCreate(BaseModel):
     # JSONB arrays / objects
     work_experience: List[Any] = Field(default_factory=list)
     education: List[Any] = Field(default_factory=list)
+    projects: List[Any] = Field(default_factory=list)
     technical_skills: List[str] = Field(default_factory=list)
     tools: List[str] = Field(default_factory=list)
     soft_skills: List[str] = Field(default_factory=list)
@@ -92,6 +93,7 @@ class CandidateUpdate(BaseModel):
     primary_domain: Optional[str] = None
     work_experience: Optional[List[Any]] = None
     education: Optional[List[Any]] = None
+    projects: Optional[List[Any]] = None
     technical_skills: Optional[List[str]] = None
     tools: Optional[List[str]] = None
     soft_skills: Optional[List[str]] = None
@@ -131,6 +133,7 @@ class CandidateResponse(BaseModel):
     primary_domain: str
     work_experience: List[Any]
     education: List[Any]
+    projects: List[Any] = Field(default_factory=list)
     technical_skills: List[str]
     tools: List[str]
     soft_skills: List[str]
@@ -295,3 +298,21 @@ class RetentionPurgeResponse(BaseModel):
     matched_count: int
     purged_count: int
     candidate_ids: List[UUID] = Field(default_factory=list)
+
+
+class SectionRemapCandidateResult(BaseModel):
+    candidate_id: UUID
+    source_used: str  # "resume_text" | "resume_file" | "existing_fields_only"
+    updated_fields: List[str] = Field(default_factory=list)
+    skipped_hand_edited_fields: List[str] = Field(default_factory=list)
+
+
+class SectionRemapResponse(BaseModel):
+    """Response from POST /api/v1/candidates/admin/remap-sections."""
+
+    dry_run: bool
+    scanned: int
+    would_update: int
+    updated: int
+    skipped_hand_edited: int
+    results: List[SectionRemapCandidateResult] = Field(default_factory=list)

@@ -55,7 +55,9 @@ from app.schemas.candidate import (
     CandidateResponse,
     CandidateStats,
     CandidateUpdate,
+    SectionRemapResponse,
 )
+from app.services.remap import remap_candidate_sections
 from app.schemas.clarity import CandidateBriefResponse, CandidateTimelineResponse
 from app.schemas.matching import CandidateCompareResponse, CandidateSearchResponse
 from app.schemas.pipeline import (
@@ -87,6 +89,27 @@ def _to_list_item(candidate: Candidate) -> CandidateListItem:
     if candidate.resume_file is not None:
         item.resume_filename = candidate.resume_file.original_filename
     return item
+
+
+@router.post("/admin/remap-sections", response_model=SectionRemapResponse)
+async def admin_remap_sections_endpoint(
+    dry_run: bool = Query(True, description="Preview changes without modifying the database (default true)"),
+    candidate_id: Optional[UUID] = Query(None, description="Optional single candidate UUID"),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.admin)),
+):
+    """
+    Admin-only re-mapping of existing candidates' education dates, work employment_type,
+    and projects from stored resume text/files. Dry-run by default; skips hand-edited sections.
+    """
+    return await remap_candidate_sections(
+        db,
+        dry_run=dry_run,
+        candidate_id=candidate_id,
+        limit=limit,
+        actor_id=current_user.id,
+    )
 
 
 @router.post("/", response_model=CandidateResponse, status_code=status.HTTP_201_CREATED)

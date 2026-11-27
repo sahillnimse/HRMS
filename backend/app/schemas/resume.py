@@ -7,8 +7,17 @@ every resume, with defensive normalization for common LLM formatting quirks
 """
 
 import re
-from typing import Any, List, Optional
-from pydantic import BaseModel, Field, EmailStr, HttpUrl, TypeAdapter, field_validator
+from typing import Any, List, Literal, Optional
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, TypeAdapter, field_validator, model_validator
+
+from app.services.section_mapping import (
+    MAX_PROJECT_DESC_CHARS,
+    MAX_PROJECT_TECHS,
+    MAX_PROJECTS,
+    infer_employment_type,
+    normalize_employment_type_value,
+    parse_education_dates,
+)
 
 _email_adapter = TypeAdapter(EmailStr)
 _url_adapter = TypeAdapter(HttpUrl)
@@ -129,11 +138,26 @@ class ProfileOverview(BaseModel):
         return max(0.0, float(match.group(0))) if match else 0.0
 
 
+EmploymentType = Literal[
+    "full_time",
+    "internship",
+    "trainee",
+    "contract",
+    "freelance",
+    "part_time",
+    "unknown",
+]
+
+
 class WorkExperienceItem(BaseModel):
     """A single work experience entry."""
 
     company: str = Field(default="", description="Company name")
     job_title: str = Field(default="", description="Job title")
+    employment_type: EmploymentType = Field(
+        default="unknown",
+        description="Role type: full_time, internship, trainee, contract, freelance, part_time, or unknown",
+    )
     start_date: Optional[str] = Field(None, description="Start date (e.g. 'Jan 2020')")
     end_date: Optional[str] = Field(None, description="End date, or 'Present'")
     bullets: List[str] = Field(
@@ -146,6 +170,11 @@ class WorkExperienceItem(BaseModel):
     def normalize_role_strings(cls, v: Any) -> str:
         return _clean_optional_str(v) or ""
 
+    @field_validator("employment_type", mode="before")
+    @classmethod
+    def normalize_emp_type(cls, v: Any) -> str:
+        return normalize_employment_type_value(v)
+
     @field_validator("start_date", "end_date", mode="before")
     @classmethod
     def normalize_dates(cls, v: Any) -> Optional[str]:
@@ -156,28 +185,92 @@ class WorkExperienceItem(BaseModel):
     def normalize_bullets(cls, v: Any) -> List[str]:
         return _clean_str_list(v)
 
+    @model_validator(mode="after")
+    def infer_missing_employment_type(self) -> "WorkExperienceItem":
+        self.employment_type = infer_employment_type(
+            self.job_title, self.company, self.employment_type
+        )  # type: ignore[assignment]
+        return self
+
 
 class EducationItem(BaseModel):
     """A single education entry."""
 
-    degree: str = Field(default="", description="Degree earned")
+    degree: str = Field(default="", description="Degree earned (e.g. B.E., B.Tech, M.S.)")
+    field_of_study: Optional[str] = Field(
+        None, description="Major / field of study (e.g. Computer Science)"
+    )
     institution: str = Field(default="", description="Institution name")
-    graduation_year: Optional[int] = Field(None, description="Graduation year")
+    start_year: Optional[int] = Field(None, description="Program start year (e.g. 2020)")
+    end_year: Optional[int] = Field(None, description="Program end / expected graduation year (e.g. 2024)")
+    graduation_year: Optional[int] = Field(
+        None, description="Graduation year (kept synced with end_year for backward compatibility)"
+    )
+    is_current: bool = Field(
+        default=False, description="True if currently pursuing / expected graduation"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_flexible_edu_dates(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        s_yr, e_yr, g_yr, is_curr = parse_education_dates(
+            start_year=out.get("start_year"),
+            end_year=out.get("end_year"),
+            graduation_year=out.get("graduation_year"),
+            date_range=out.get("date_range") if isinstance(out.get("date_range"), str) else None,
+            is_current=bool(out.get("is_current")) if out.get("is_current") is not None else None,
+        )
+        out["start_year"] = s_yr
+        out["end_year"] = e_yr
+        out["graduation_year"] = g_yr
+        out["is_current"] = is_curr
+        out.pop("date_range", None)
+        return out
 
     @field_validator("degree", "institution", mode="before")
     @classmethod
     def normalize_edu_strings(cls, v: Any) -> str:
         return _clean_optional_str(v) or ""
 
-    @field_validator("graduation_year", mode="before")
+    @field_validator("field_of_study", mode="before")
     @classmethod
-    def normalize_grad_year(cls, v: Any) -> Optional[int]:
-        if v is None or v == "":
-            return None
-        if isinstance(v, int):
-            return v
-        match = re.search(r"(19|20)\d{2}", str(v))
-        return int(match.group(0)) if match else None
+    def normalize_field_of_study(cls, v: Any) -> Optional[str]:
+        return _clean_optional_str(v)
+
+
+class ProjectItem(BaseModel):
+    """A candidate project entry extracted from the resume (capped in size)."""
+
+    name: str = Field(default="", description="Project title")
+    description: str = Field(default="", description="Concise summary of what was built")
+    technologies: List[str] = Field(
+        default_factory=list, description="Technologies, frameworks, and tools used"
+    )
+    start_date: Optional[str] = Field(None, description="Optional project start date")
+    end_date: Optional[str] = Field(None, description="Optional project end date")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_proj_name(cls, v: Any) -> str:
+        return (_clean_optional_str(v) or "")[:120]
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_proj_desc(cls, v: Any) -> str:
+        return (_clean_optional_str(v) or "")[:MAX_PROJECT_DESC_CHARS]
+
+    @field_validator("technologies", mode="before")
+    @classmethod
+    def normalize_proj_techs(cls, v: Any) -> List[str]:
+        return _clean_str_list(v)[:MAX_PROJECT_TECHS]
+
+    @field_validator("start_date", "end_date", mode="before")
+    @classmethod
+    def normalize_proj_dates(cls, v: Any) -> Optional[str]:
+        return _clean_optional_str(v)
 
 
 class Skills(BaseModel):
@@ -290,6 +383,7 @@ class ParsedResume(BaseModel):
     profile: ProfileOverview
     work_experience: List[WorkExperienceItem] = Field(default_factory=list)
     education: List[EducationItem] = Field(default_factory=list)
+    projects: List[ProjectItem] = Field(default_factory=list)
     skills: Skills = Field(default_factory=Skills)
     additional_info: AdditionalInfo = Field(default_factory=AdditionalInfo)
 
@@ -297,6 +391,11 @@ class ParsedResume(BaseModel):
     @classmethod
     def normalize_item_lists(cls, v: Any) -> list:
         return v if isinstance(v, list) else []
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def normalize_projects_field(cls, v: Any) -> list:
+        return v[:MAX_PROJECTS] if isinstance(v, list) else []
 
     @field_validator("skills", mode="before")
     @classmethod
@@ -323,6 +422,7 @@ class ParsedResume(BaseModel):
             "primary_domain": self.profile.primary_domain,
             "work_experience": [we.model_dump() for we in self.work_experience],
             "education": [edu.model_dump() for edu in self.education],
+            "projects": [proj.model_dump() for proj in self.projects[:MAX_PROJECTS]],
             "technical_skills": self.skills.technical_skills,
             "tools": self.skills.tools,
             "soft_skills": self.skills.soft_skills,

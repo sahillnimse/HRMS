@@ -54,7 +54,10 @@ async def parse_resume_pipeline(
     flat = parsed.to_flat_dict()
 
     llm_years = flat["years_experience"]
-    computed_years = compute_years_experience(flat["work_experience"])
+    computed_years = compute_years_experience(
+        flat["work_experience"],
+        include_internships=settings.COUNT_INTERNSHIPS_IN_EXPERIENCE,
+    )
     flat["years_experience"] = computed_years
 
     matches = await find_duplicates(

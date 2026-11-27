@@ -114,6 +114,16 @@ def redact_ctc_for_role(resp: CandidateResponse, role: UserRole) -> CandidateRes
         else:
             cleaned_work.append(item)
 
+    cleaned_projects = []
+    for item in resp.projects or []:
+        if isinstance(item, dict):
+            copy = dict(item)
+            if isinstance(copy.get("description"), str):
+                copy["description"] = _redact_ctc_text(copy["description"])
+            cleaned_projects.append(copy)
+        else:
+            cleaned_projects.append(item)
+
     return resp.model_copy(
         update={
             "current_ctc": None,
@@ -121,6 +131,7 @@ def redact_ctc_for_role(resp: CandidateResponse, role: UserRole) -> CandidateRes
             "ctc_currency": None,
             "profile_summary": _redact_ctc_text(resp.profile_summary),
             "work_experience": cleaned_work,
+            "projects": cleaned_projects,
             "raw_parsed_data": _sanitize_raw_for_viewer(resp.raw_parsed_data or {}),
         }
     )
@@ -216,6 +227,18 @@ def redact_for_blind_screening(resp: CandidateResponse) -> CandidateResponse:
         else:
             redacted_work.append(item)
 
+    redacted_projects = []
+    for item in resp.projects or []:
+        if isinstance(item, dict):
+            copy = dict(item)
+            if isinstance(copy.get("name"), str):
+                copy["name"] = _mask_tokens_in_text(copy["name"], tokens)
+            if isinstance(copy.get("description"), str):
+                copy["description"] = _mask_tokens_in_text(copy["description"], tokens)
+            redacted_projects.append(copy)
+        else:
+            redacted_projects.append(item)
+
     return resp.model_copy(
         update={
             "full_name": blind_candidate_label(resp.id),
@@ -228,6 +251,7 @@ def redact_for_blind_screening(resp: CandidateResponse) -> CandidateResponse:
             "profile_summary": _mask_tokens_in_text(resp.profile_summary, tokens),
             "work_experience": redacted_work,
             "education": redacted_edu,
+            "projects": redacted_projects,
             "raw_parsed_data": _sanitize_raw_for_blind(resp.raw_parsed_data or {}, tokens),
         }
     )

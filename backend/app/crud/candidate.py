@@ -27,6 +27,12 @@ from app.services.embeddings import (
 )
 from app.services.file_storage import BaseStorage, storage as default_storage
 from app.services.normalization import normalize_email, normalize_phone
+from app.services.section_mapping import (
+    deduplicate_skills_across_lists,
+    normalize_education_list,
+    normalize_projects_list,
+    normalize_work_experience_list,
+)
 from app.services.skills import load_skill_alias_map, normalize_skill_list
 
 
@@ -171,6 +177,13 @@ async def _refresh_search_vector(db: AsyncSession, candidate_id: UUID) -> None:
                     SELECT string_agg(val, ' ')
                     FROM jsonb_array_elements_text(COALESCE(technical_skills, '[]'::jsonb) || COALESCE(tools, '[]'::jsonb)) AS val
                 ), '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE((
+                    SELECT string_agg(
+                        COALESCE(proj->>'name', '') || ' ' || COALESCE(proj->>'description', ''),
+                        ' '
+                    )
+                    FROM jsonb_array_elements(COALESCE(projects, '[]'::jsonb)) AS proj
+                ), '')), 'B') ||
                 setweight(to_tsvector('english', COALESCE(profile_summary, '')), 'C')
             WHERE id = :cid
             """
@@ -186,8 +199,12 @@ async def create_candidate(
     is_duplicate_flagged: Optional[bool] = None,
 ) -> Candidate:
     alias_map = await load_skill_alias_map(db)
-    norm_tech = normalize_skill_list(candidate_in.technical_skills, alias_map)
-    norm_tools = normalize_skill_list(candidate_in.tools, alias_map)
+    norm_tech, norm_tools = deduplicate_skills_across_lists(
+        candidate_in.technical_skills, candidate_in.tools, alias_map
+    )
+    norm_work = normalize_work_experience_list(candidate_in.work_experience)
+    norm_edu = normalize_education_list(candidate_in.education)
+    norm_projects = normalize_projects_list(candidate_in.projects)
 
     norm_email = normalize_email(str(candidate_in.email) if candidate_in.email else None)
     norm_phone = normalize_phone(candidate_in.phone)
@@ -202,7 +219,7 @@ async def create_candidate(
         profile_summary=candidate_in.profile_summary,
         technical_skills=norm_tech,
         tools=norm_tools,
-        work_experience=candidate_in.work_experience,
+        work_experience=norm_work,
     )
     emb_vec = await generate_embedding(emb_text)
 
@@ -218,8 +235,9 @@ async def create_candidate(
         profile_summary=candidate_in.profile_summary,
         years_experience=candidate_in.years_experience,
         primary_domain=candidate_in.primary_domain,
-        work_experience=candidate_in.work_experience,
-        education=candidate_in.education,
+        work_experience=norm_work,
+        education=norm_edu,
+        projects=norm_projects,
         technical_skills=norm_tech,
         tools=norm_tools,
         soft_skills=candidate_in.soft_skills,
@@ -274,12 +292,30 @@ async def update_candidate(
         update_data["phone_normalized"] = normalize_phone(update_data["phone"])
     if "ctc_currency" in update_data and update_data["ctc_currency"]:
         update_data["ctc_currency"] = update_data["ctc_currency"].strip().upper()
-    if "technical_skills" in update_data and update_data["technical_skills"] is not None:
-        update_data["technical_skills"] = normalize_skill_list(
-            update_data["technical_skills"], alias_map
+    if "work_experience" in update_data and update_data["work_experience"] is not None:
+        update_data["work_experience"] = normalize_work_experience_list(update_data["work_experience"])
+    if "education" in update_data and update_data["education"] is not None:
+        update_data["education"] = normalize_education_list(update_data["education"])
+    if "projects" in update_data and update_data["projects"] is not None:
+        update_data["projects"] = normalize_projects_list(update_data["projects"])
+    if (
+        "technical_skills" in update_data
+        and update_data["technical_skills"] is not None
+        and "tools" in update_data
+        and update_data["tools"] is not None
+    ):
+        clean_tech, clean_tools = deduplicate_skills_across_lists(
+            update_data["technical_skills"], update_data["tools"], alias_map
         )
-    if "tools" in update_data and update_data["tools"] is not None:
-        update_data["tools"] = normalize_skill_list(update_data["tools"], alias_map)
+        update_data["technical_skills"] = clean_tech
+        update_data["tools"] = clean_tools
+    else:
+        if "technical_skills" in update_data and update_data["technical_skills"] is not None:
+            update_data["technical_skills"] = normalize_skill_list(
+                update_data["technical_skills"], alias_map
+            )
+        if "tools" in update_data and update_data["tools"] is not None:
+            update_data["tools"] = normalize_skill_list(update_data["tools"], alias_map)
 
     if "raw_parsed_data" in update_data and isinstance(update_data["raw_parsed_data"], dict):
         # Preserve server-side _resume_text stored in DB even though API responses strip it
@@ -304,6 +340,7 @@ async def update_candidate(
         "technical_skills",
         "tools",
         "work_experience",
+        "projects",
     }
     if search_relevant_fields & set(update_data.keys()):
         await db.flush()

@@ -40,12 +40,17 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIMENSIONS: int = 768
 
-    # --- Candidate Clarity, Brief & Timeline (Phase 4) ---
+    # --- Candidate Clarity, Brief & Timeline (Phase 4 & Section Mapping) ---
     ENABLE_CANDIDATE_BRIEF: bool = True
     CANDIDATE_BRIEF_TIMEOUT_SECONDS: int = 25
     TIMELINE_GAP_THRESHOLD_MONTHS: int = 3
     SHORT_STINT_MAX_MONTHS: int = 12
     EXPERIENCE_MISMATCH_YEARS_THRESHOLD: float = 1.5
+    EDU_DURATION_BACHELORS_MONTHS: int = 48
+    EDU_DURATION_MASTERS_MONTHS: int = 24
+    EDU_DURATION_DIPLOMA_MONTHS: int = 36
+    EDU_ESTIMATED_GRADUATION_MONTH: int = 6
+    COUNT_INTERNSHIPS_IN_EXPERIENCE: bool = True
 
     # --- Interview Workflow, Calendar & Email (Phase 5) ---
     DEFAULT_TIMEZONE: str = "Asia/Kolkata"

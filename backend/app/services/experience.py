@@ -96,11 +96,15 @@ def compute_years_experience(
     work_experience: Sequence[Any],
     *,
     today: Optional[date] = None,
+    include_internships: bool = True,
 ) -> float:
     """
     Compute total non-overlapping professional years from work_experience items.
     Accepts dicts or objects exposing start_date / end_date attributes.
+    When `include_internships` is False, roles classified as internship/trainee are excluded.
     """
+    from app.services.section_mapping import infer_employment_type
+
     ref = today or date.today()
     max_month = _to_month_index(ref.year, ref.month)
     intervals: list[tuple[int, int]] = []
@@ -109,9 +113,20 @@ def compute_years_experience(
         if isinstance(item, dict):
             raw_start = item.get("start_date")
             raw_end = item.get("end_date")
+            title = str(item.get("job_title") or "")
+            company = str(item.get("company") or "")
+            explicit_type = item.get("employment_type")
         else:
             raw_start = getattr(item, "start_date", None)
             raw_end = getattr(item, "end_date", None)
+            title = str(getattr(item, "job_title", "") or "")
+            company = str(getattr(item, "company", "") or "")
+            explicit_type = getattr(item, "employment_type", None)
+
+        if not include_internships:
+            emp_type = infer_employment_type(title, company, explicit_type)
+            if emp_type in {"internship", "trainee"}:
+                continue
 
         start = parse_resume_date(raw_start, is_end=False, today=ref)
         if start is None:

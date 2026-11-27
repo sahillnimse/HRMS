@@ -106,9 +106,12 @@ class Candidate(Base):
     years_experience: Mapped[float] = mapped_column(nullable=False, default=0.0, index=True)
     primary_domain: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
-    # --- Work Experience & Education (JSONB) ---
+    # --- Work Experience, Education & Projects (JSONB) ---
     work_experience: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     education: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    projects: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
+    )
 
     # --- Skills (JSONB arrays) ---
     technical_skills: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
