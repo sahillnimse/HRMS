@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     privacy,
     resumes,
     skills,
+    talent_pools,
 )
 
 api_router = APIRouter()
@@ -40,3 +41,4 @@ api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["audit-logs"])
 api_router.include_router(privacy.router, prefix="/privacy", tags=["privacy"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
+api_router.include_router(talent_pools.router, prefix="/talent-pools", tags=["talent-pools"])

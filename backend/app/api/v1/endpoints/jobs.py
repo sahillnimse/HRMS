@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
+from app.crud.backlog import resurface_silver_medalists_for_job
 from app.crud.matching import list_job_matches, run_job_matching
 from app.crud.pipeline import (
     create_application,
@@ -43,6 +44,7 @@ from app.crud.workflow import (
 from app.models.candidate import Candidate
 from app.models.pipeline import JobStatus
 from app.models.user import User, UserRole
+from app.schemas.backlog import ResurfaceResponse
 from app.schemas.candidate import CandidateResponse
 from app.schemas.clarity import CandidateTimelineResponse
 from app.schemas.matching import JobMatchItem, JobMatchRequest
@@ -247,6 +249,24 @@ async def export_job_shortlist_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@jobs_router.get("/{job_id}/resurface", response_model=ResurfaceResponse)
+async def resurface_candidates_for_job_endpoint(
+    job_id: UUID,
+    limit: int = Query(10, ge=1, le=50),
+    blind: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """
+    Resurface silver-medalist candidates who reached `interview` or `offer` on other jobs
+    and are not yet in this job's pipeline, ranked by deterministic JD match score.
+    """
+    res = await resurface_silver_medalists_for_job(db, job_id, limit=limit, blind=blind)
+    if not res:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return res
 
 
 @jobs_router.get("/{job_id}/shortlist/export/pdf")

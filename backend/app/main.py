@@ -64,7 +64,27 @@ async def lifespan(_app: FastAPI):
             await direct_engine.dispose()
 
 
+def _init_optional_sentry() -> None:
+    """Optionally initialize Sentry error monitoring with strict zero-PII defaults."""
+    dsn = (settings.SENTRY_DSN or "").strip()
+    if not dsn:
+        return
+    try:
+        import sentry_sdk  # type: ignore[import-not-found]
+
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=settings.APP_ENV,
+            traces_sample_rate=float(settings.SENTRY_TRACES_SAMPLE_RATE),
+            send_default_pii=False,
+        )
+        logger.info("Sentry monitoring initialized (send_default_pii=False).")
+    except ImportError:
+        logger.warning("SENTRY_DSN is set but sentry-sdk is not installed; skipping Sentry init.")
+
+
 def create_app() -> FastAPI:
+    _init_optional_sentry()
     is_prod = settings.APP_ENV.lower() == "production"
     app = FastAPI(
         title=settings.APP_NAME,

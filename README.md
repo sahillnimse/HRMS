@@ -62,6 +62,9 @@ npm run dev
 | `DEFAULT_TIMEZONE` / `CALENDAR_PROVIDER` | Display timezone (`Asia/Kolkata`) and calendar provider (`ics`; Google/Outlook future extension point) | `Asia/Kolkata` / `ics` |
 | `EMAIL_BACKEND` / `SMTP_*` | Pluggable email sender (`console` dev default, or `smtp` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) | `console` / `587` |
 | `STUCK_APPLIED_DAYS` / `STUCK_SCREENED_DAYS` / `STUCK_INTERVIEW_DAYS` / `STUCK_OFFER_DAYS` | Default per-stage thresholds (days) for stuck-candidate analytics | `7` / `7` / `10` / `7` |
+| `ENABLE_INTERVIEW_QUESTIONS` / `ENABLE_NL_SEARCH` | Feature flags for AI interview question generation & natural-language candidate search (both have deterministic fallbacks) | `true` / `true` |
+| `INBOUND_EMAIL_WEBHOOK_SECRET` | Shared `X-Inbound-Webhook-Secret` header for automated email-to-inbox CV ingestion webhooks | — |
+| `SENTRY_DSN` / `SENTRY_TRACES_SAMPLE_RATE` | Optional Sentry error monitoring (`send_default_pii=False` strictly enforced when enabled) | — / `0.1` |
 | `SECRET_KEY` | JWT signing key (must be ≥32 random chars in `production`) | `change-me-in-production` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Short-lived access JWT TTL in minutes | `15` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Rotating `HttpOnly` refresh cookie TTL in days | `7` |
@@ -107,6 +110,15 @@ All analytics metrics are derived directly from `application_events`, `applicati
 - `GET /api/v1/analytics/time-to-hire?job_id=&start_date=&end_date=` — Average, median, min, and max days from application start to `hired`.
 - `GET /api/v1/analytics/sources?job_id=&start_date=&end_date=` — Candidate volume, applications, screened/interviewed counts, hires, and hire rate grouped by `Candidate.source`.
 - `GET /api/v1/analytics/stuck?job_id=&applied_days=&screened_days=&interview_days=&offer_days=&blind=false` — Active applications exceeding per-stage SLA thresholds (blind-mode aware).
+
+## High-ROI Backlog Endpoints
+
+- `POST /api/v1/candidates/{id}/interview-questions` — Generate fair, tailored interview questions grounded in projects, JD skill gaps/adjacent skills, and neutral "worth verifying" prompts (Gemini structured output + deterministic fallback).
+- `POST /api/v1/candidates/nl-search` — Natural-language search (`"Python, 3+ yrs, Pune, notice < 30 days"`) parsed into structured filters + existing hybrid/semantic search (deterministic regex fallback when AI is off).
+- `GET/POST/DELETE /api/v1/talent-pools`, `GET/POST/DELETE /api/v1/talent-pools/{id}/members`, `GET /api/v1/jobs/{id}/resurface` — Curated talent pools & automatic silver-medalist resurfacing (past `interview`/`offer` near-misses scored against new jobs).
+- `POST /api/v1/resumes/inbound-email`, `GET /api/v1/resumes/inbound-logs` — Idempotent email-to-inbox CV ingestion webhook (`X-Inbound-Webhook-Secret` or recruiter/admin Bearer JWT) feeding PDF/DOCX attachments straight into the bulk review queue.
+- `GET/POST /api/v1/privacy/erasure-requests`, `POST /api/v1/privacy/erasure-requests/{id}/execute` — India DPDP Act erasure & consent-withdrawal ledger with admin-executed full PII/file deletion and PII-free compliance proof.
+- **Playwright E2E Smoke Suite:** `frontend/e2e/smoke.spec.ts` (run locally via `npx playwright test frontend/e2e/smoke.spec.ts`).
 
 ## Deployment Topology (Vercel + Render + Neon + R2)
 

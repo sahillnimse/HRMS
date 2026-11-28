@@ -1,3 +1,9 @@
+from app.models.backlog import (
+    ErasureRequest,
+    InboundEmailLog,
+    TalentPool,
+    TalentPoolMember,
+)
 from app.models.candidate import (
     Candidate,
     ParseJob,
@@ -43,6 +49,8 @@ __all__ = [
     "EmailLog",
     "EmailStatus",
     "EmailTemplate",
+    "ErasureRequest",
+    "InboundEmailLog",
     "Interview",
     "InterviewMode",
     "InterviewParticipant",
@@ -61,6 +69,8 @@ __all__ = [
     "ScorecardRecommendation",
     "ScorecardTemplate",
     "SkillNormalization",
+    "TalentPool",
+    "TalentPoolMember",
     "User",
     "UserRole",
 ]

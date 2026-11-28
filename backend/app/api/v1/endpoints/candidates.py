@@ -45,7 +45,16 @@ from app.crud.pipeline import (
     list_candidate_applications,
     list_candidate_notes,
 )
+from app.crud.backlog import list_candidate_pools
 from app.crud.workflow import get_candidate_scorecard_summary, list_candidate_emails
+from app.models.pipeline import Job
+from app.schemas.backlog import (
+    InterviewQuestionsRequest,
+    InterviewQuestionsResponse,
+    NLSearchRequest,
+    NLSearchResponse,
+    TalentPoolResponse,
+)
 from app.schemas.workflow import EmailLogResponse, ScorecardAggregate
 from app.models.candidate import Candidate, ResumeFile
 from app.models.user import User, UserRole
@@ -68,11 +77,18 @@ from app.schemas.pipeline import (
     CandidateNoteCreate,
     CandidateNoteResponse,
 )
-from app.services.audit import record_audit, redact_ctc_for_role, redact_for_blind_screening
+from app.services.audit import (
+    blind_candidate_label,
+    record_audit,
+    redact_ctc_for_role,
+    redact_for_blind_screening,
+)
 from app.services.brief import get_or_generate_candidate_brief
 from app.services.consistency import compute_skill_evidence, run_consistency_checks
 from app.services.exports import build_candidate_pdf, build_shortlist_xlsx
 from app.services.file_storage import storage
+from app.services.interview_questions import generate_interview_questions
+from app.services.nl_search import parse_nl_search_query
 from app.services.skills import load_skill_alias_map
 from app.services.timeline import build_career_timeline, build_study_windows
 
@@ -92,6 +108,59 @@ def _to_list_item(candidate: Candidate) -> CandidateListItem:
     if candidate.resume_file is not None:
         item.resume_filename = candidate.resume_file.original_filename
     return item
+
+
+@router.post("/nl-search", response_model=NLSearchResponse)
+async def nl_search_candidates_endpoint(
+    payload: NLSearchRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """
+    Natural-language candidate search (e.g. "Python, 3+ yrs, Pune, notice < 30 days"):
+    parses structured filters via Gemini (with deterministic regex fallback) and runs hybrid search.
+    """
+    alias_map = await load_skill_alias_map(db)
+    parsed, parser_mode = await parse_nl_search_query(payload.query, alias_map=alias_map)
+
+    skills_csv = ",".join(parsed.skills) if parsed.skills else None
+    search_res = await search_candidates_hybrid(
+        db,
+        q=parsed.semantic_query or None,
+        page=payload.page,
+        page_size=payload.page_size,
+        primary_domain=parsed.primary_domain,
+        skills=skills_csv,
+        min_years=parsed.min_years,
+        max_years=parsed.max_years,
+        city=parsed.city,
+        max_notice_days=parsed.max_notice_days,
+    )
+
+    items = search_res.items
+    if payload.blind:
+        items = [
+            it.model_copy(
+                update={
+                    "full_name": blind_candidate_label(it.id),
+                    "email": None,
+                    "phone": None,
+                }
+            )
+            for it in items
+        ]
+
+    return NLSearchResponse(
+        original_query=payload.query,
+        parser_mode=parser_mode,
+        parsed_filters=parsed,
+        items=items,
+        total=search_res.total,
+        page=search_res.page,
+        page_size=search_res.page_size,
+        pages=search_res.pages,
+        semantic_used=search_res.semantic_used,
+    )
 
 
 @router.post("/admin/remap-sections", response_model=SectionRemapResponse)
@@ -597,6 +666,51 @@ async def get_candidate_timeline_endpoint(
         consistency_checks=checks,
         skill_evidence=skill_evidence,
     )
+
+
+@router.post("/{candidate_id}/interview-questions", response_model=InterviewQuestionsResponse)
+async def generate_interview_questions_endpoint(
+    candidate_id: UUID,
+    payload: InterviewQuestionsRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    """
+    Generate tailored, fair interview questions grounded in the candidate's projects,
+    skills, optional target JD skill-gaps, and neutral 'worth verifying' items.
+    """
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    job_obj: Optional[Job] = None
+    if payload.job_id is not None:
+        job_obj = (
+            await db.execute(select(Job).where(Job.id == payload.job_id))
+        ).scalar_one_or_none()
+        if not job_obj:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    alias_map = await load_skill_alias_map(db)
+    return await generate_interview_questions(
+        candidate,
+        job=job_obj,
+        alias_map=alias_map,
+        count=payload.count,
+        blind=payload.blind,
+    )
+
+
+@router.get("/{candidate_id}/talent-pools", response_model=List[TalentPoolResponse])
+async def get_candidate_talent_pools_endpoint(
+    candidate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*READ_ROLES)),
+):
+    candidate = await get_candidate_by_id(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    return await list_candidate_pools(db, candidate_id)
 
 
 @router.get("/{candidate_id}/applications", response_model=List[ApplicationResponse])

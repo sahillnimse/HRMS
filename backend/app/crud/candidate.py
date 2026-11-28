@@ -447,6 +447,8 @@ async def search_candidates_hybrid(
     skills: Optional[str] = None,
     min_years: Optional[float] = None,
     max_years: Optional[float] = None,
+    city: Optional[str] = None,
+    max_notice_days: Optional[int] = None,
 ) -> CandidateSearchResponse:
     """
     Hybrid search combining PostgreSQL FTS (`search_vector`), `pg_trgm` fuzzy similarity,
@@ -469,6 +471,25 @@ async def search_candidates_hybrid(
         conditions.append(Candidate.years_experience >= min_years)
     if max_years is not None:
         conditions.append(Candidate.years_experience <= max_years)
+    if city and city.strip():
+        city_like = f"%{city.strip()}%"
+        conditions.append(
+            or_(
+                Candidate.city.ilike(city_like),
+                text(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements_text("
+                    "COALESCE(candidates.preferred_locations, '[]'::jsonb)) AS _loc "
+                    "WHERE LOWER(_loc) LIKE LOWER(:city_like))"
+                ).bindparams(city_like=city_like),
+            )
+        )
+    if max_notice_days is not None:
+        conditions.append(
+            and_(
+                Candidate.notice_period_days.is_not(None),
+                Candidate.notice_period_days <= max_notice_days,
+            )
+        )
 
     stmt = select(Candidate).options(selectinload(Candidate.resume_file))
     if conditions:

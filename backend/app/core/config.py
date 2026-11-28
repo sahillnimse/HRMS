@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     STUCK_INTERVIEW_DAYS: int = 10
     STUCK_OFFER_DAYS: int = 7
 
+    # --- Backlog High-ROI Features (NL Search, Question Generator, Inbound CV, Sentry) ---
+    ENABLE_INTERVIEW_QUESTIONS: bool = True
+    ENABLE_NL_SEARCH: bool = True
+    INBOUND_EMAIL_WEBHOOK_SECRET: str = ""
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
     # --- File Storage ---
     STORAGE_BACKEND: str = "local"  # "local" | "s3" | "r2"
     UPLOAD_DIR: str = "./uploads"

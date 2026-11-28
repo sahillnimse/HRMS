@@ -8,10 +8,13 @@ import {
   Download,
   Edit3,
   FileText,
+  HelpCircle,
   LayoutDashboard,
   MessageSquare,
   Network,
+  Plus,
   RefreshCw,
+  Tag,
   Trash2,
   X,
 } from 'lucide-react'
@@ -35,6 +38,7 @@ import { CandidateNetworkGraph } from '@/components/CandidateNetworkGraph'
 import { CandidateNotesAndActivity } from '@/components/CandidateNotesAndActivity'
 import { EditableReview } from '@/components/EditableReview'
 import { ResumePreview } from '@/components/ResumePreview'
+import { InterviewQuestionsModal } from '@/components/InterviewQuestionsDrawer'
 import type {
   ApplicationItem,
   CandidateResponse,
@@ -42,6 +46,7 @@ import type {
   CandidateUpdate,
   ParsedResumeData,
   SkillEvidenceItem,
+  TalentPool,
 } from '@/types'
 
 type DetailTab = 'overview' | 'timeline' | 'workflow' | 'network' | 'activity' | 'resume' | 'edit'
@@ -66,10 +71,19 @@ export default function CandidateDetailPage() {
   const [exportingPdf, setExportingPdf] = useState(false)
 
   const [showAddToJob, setShowAddToJob] = useState(false)
+  const [showQuestions, setShowQuestions] = useState(false)
   const [candidateApps, setCandidateApps] = useState<ApplicationItem[]>([])
   const [addingJobId, setAddingJobId] = useState<string | null>(null)
   const [activityRefresh, setActivityRefresh] = useState(0)
   const [skillEvidence, setSkillEvidence] = useState<SkillEvidenceItem[]>([])
+
+  // Talent pools
+  const [candidatePools, setCandidatePools] = useState<TalentPool[]>([])
+  const [allPools, setAllPools] = useState<TalentPool[]>([])
+  const [poolBusyId, setPoolBusyId] = useState<string | null>(null)
+  const [showNewPool, setShowNewPool] = useState(false)
+  const [newPoolName, setNewPoolName] = useState('')
+  const [creatingPool, setCreatingPool] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -100,6 +114,73 @@ export default function CandidateDetailPage() {
       setTab('overview')
     }
   }, [blindMode, tab])
+
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    Promise.all([
+      api.get<TalentPool[]>(`/candidates/${id}/talent-pools`).catch(() => ({ data: [] as TalentPool[] })),
+      api.get<TalentPool[]>('/talent-pools/').catch(() => ({ data: [] as TalentPool[] })),
+    ]).then(([candRes, allRes]) => {
+      if (!active) return
+      setCandidatePools(candRes.data || [])
+      setAllPools(allRes.data || [])
+    })
+    return () => {
+      active = false
+    }
+  }, [id])
+
+  const handleAddToPool = async (poolId: string) => {
+    if (!id || !poolId) return
+    setPoolBusyId(poolId)
+    try {
+      await api.post(`/talent-pools/${poolId}/members`, { candidate_id: id })
+      const pool = allPools.find((p) => p.id === poolId)
+      if (pool && !candidatePools.some((p) => p.id === poolId)) {
+        setCandidatePools((prev) => [...prev, pool])
+      }
+      addToast('Added to talent pool', 'success')
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Failed to add to talent pool'), 'error')
+    } finally {
+      setPoolBusyId(null)
+    }
+  }
+
+  const handleRemoveFromPool = async (poolId: string) => {
+    if (!id) return
+    setPoolBusyId(poolId)
+    try {
+      await api.delete(`/talent-pools/${poolId}/members/${id}`)
+      setCandidatePools((prev) => prev.filter((p) => p.id !== poolId))
+      addToast('Removed from talent pool', 'info')
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Failed to remove from talent pool'), 'error')
+    } finally {
+      setPoolBusyId(null)
+    }
+  }
+
+  const handleCreatePool = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!id || !newPoolName.trim()) return
+    setCreatingPool(true)
+    try {
+      const res = await api.post<TalentPool>('/talent-pools/', { name: newPoolName.trim() })
+      const created = res.data
+      setAllPools((prev) => [...prev, created])
+      await api.post(`/talent-pools/${created.id}/members`, { candidate_id: id })
+      setCandidatePools((prev) => [...prev, created])
+      setNewPoolName('')
+      setShowNewPool(false)
+      addToast(`Created pool "${created.name}" & added candidate`, 'success')
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Could not create talent pool'), 'error')
+    } finally {
+      setCreatingPool(false)
+    }
+  }
 
   useEffect(() => {
     if (showAddToJob && id) {
@@ -284,6 +365,10 @@ export default function CandidateDetailPage() {
                 Add to Job
               </Button>
             )}
+            <Button variant="soft" size="sm" onClick={() => setShowQuestions(true)}>
+              <HelpCircle size={15} />
+              Interview Questions
+            </Button>
             {!blindMode && selected.resume_file_id && (
               <Button variant="outline" size="sm" onClick={handleOpenCv} loading={openingCv}>
                 <FileText size={15} />
@@ -327,6 +412,101 @@ export default function CandidateDetailPage() {
 
       {/* Phase 4.1: Concise Candidate Brief at top of profile */}
       <CandidateBriefCard candidateId={selected.id} refreshKey={activityRefresh} />
+
+      {/* Talent Pools & Curated Tags */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200/80 bg-white px-4 py-3 shadow-sm">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+          <Tag size={13} className="text-brand-600" />
+          Talent Pools
+        </span>
+
+        {candidatePools.length === 0 ? (
+          <span className="text-xs text-slate-400">Not tagged in any pool yet</span>
+        ) : (
+          candidatePools.map((pool) => (
+            <span
+              key={pool.id}
+              className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50/70 px-2.5 py-0.5 text-xs font-medium text-brand-800"
+            >
+              {pool.name}
+              {canWrite && (
+                <button
+                  type="button"
+                  disabled={poolBusyId === pool.id}
+                  onClick={() => void handleRemoveFromPool(pool.id)}
+                  className="ml-0.5 rounded-full p-0.5 text-brand-600 hover:bg-brand-100 hover:text-brand-900"
+                  aria-label={`Remove from ${pool.name}`}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </span>
+          ))
+        )}
+
+        {canWrite && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {allPools.filter((p) => !candidatePools.some((cp) => cp.id === p.id)).length > 0 && (
+              <select
+                value=""
+                disabled={Boolean(poolBusyId)}
+                onChange={(e) => {
+                  if (e.target.value) void handleAddToPool(e.target.value)
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 focus:border-brand-500 focus:outline-none"
+                aria-label="Add to existing talent pool"
+              >
+                <option value="">+ Add to pool…</option>
+                {allPools
+                  .filter((p) => !candidatePools.some((cp) => cp.id === p.id))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </select>
+            )}
+
+            {showNewPool ? (
+              <form onSubmit={handleCreatePool} className="inline-flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={newPoolName}
+                  onChange={(e) => setNewPoolName(e.target.value)}
+                  placeholder="e.g. Strong Backend"
+                  className="w-36 rounded-lg border border-slate-200 px-2.5 py-1 text-xs focus:border-brand-500 focus:outline-none"
+                  autoFocus
+                />
+                <Button type="submit" size="sm" loading={creatingPool} className="h-7 px-2.5 text-xs">
+                  Add
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewPool(false)
+                    setNewPoolName('')
+                  }}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Cancel new pool"
+                >
+                  <X size={13} />
+                </button>
+              </form>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewPool(true)}
+                className="h-7 px-2.5 text-xs"
+              >
+                <Plus size={12} />
+                New Pool
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       <Tabs
         value={tab}
@@ -501,6 +681,13 @@ export default function CandidateDetailPage() {
           </div>
         </div>
       )}
+
+      <InterviewQuestionsModal
+        open={showQuestions}
+        candidateId={selected.id}
+        candidateLabel={selected.full_name}
+        onClose={() => setShowQuestions(false)}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

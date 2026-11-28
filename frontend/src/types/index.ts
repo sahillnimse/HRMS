@@ -728,3 +728,98 @@ export interface StuckCandidatesAnalytics {
   total_stuck: number
   items: StuckCandidateItem[]
 }
+
+// --- High-ROI Backlog Features ---
+
+export interface InterviewQuestionItem {
+  category: 'technical' | 'project_deep_dive' | 'skill_gap' | 'verification' | 'behavioral'
+  target_topic: string
+  question: string
+  what_to_look_for: string
+}
+
+export interface InterviewQuestionsResponse {
+  candidate_id: string
+  job_id: string | null
+  job_title: string | null
+  model: string
+  questions: InterviewQuestionItem[]
+}
+
+export interface ParsedNLFilters {
+  skills: string[]
+  min_years: number | null
+  max_years: number | null
+  city: string | null
+  max_notice_days: number | null
+  primary_domain: string | null
+  semantic_query: string
+}
+
+export interface NLSearchResponse {
+  original_query: string
+  parser_mode: string
+  parsed_filters: ParsedNLFilters
+  items: CandidateSearchItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  semantic_used: boolean
+}
+
+export interface TalentPool {
+  id: string
+  name: string
+  description: string
+  color: string
+  member_count: number
+  created_at: string
+}
+
+export interface ResurfacedCandidateItem {
+  candidate_id: string
+  full_name: string
+  primary_domain: string
+  years_experience: number
+  past_job_id: string
+  past_job_title: string
+  past_highest_stage: string
+  match_score: number
+  matched_required_skills: string[]
+  missing_required_skills: string[]
+  why: string
+  talent_pools: string[]
+}
+
+export interface ResurfaceResponse {
+  job_id: string
+  job_title: string
+  total: number
+  candidates: ResurfacedCandidateItem[]
+}
+
+export interface InboundEmailLog {
+  id: string
+  message_id: string
+  from_domain: string
+  subject: string
+  attachment_count: number
+  parse_batch_id: string | null
+  status: string
+  error: string | null
+  created_at: string
+}
+
+export interface ErasureRequest {
+  id: string
+  candidate_id: string | null
+  candidate_ref_hash: string
+  request_type: 'erasure' | 'consent_withdrawal' | 'data_export' | string
+  status: 'pending' | 'completed' | 'rejected' | string
+  reason: string
+  requested_by: string | null
+  processed_by: string | null
+  processed_at: string | null
+  created_at: string
+}

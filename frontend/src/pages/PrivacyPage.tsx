@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  FileWarning,
+  Plus,
   RefreshCw,
   Shield,
   Sparkles,
@@ -11,6 +13,7 @@ import {
   Users,
 } from 'lucide-react'
 import { api, getErrorMessage } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -20,7 +23,7 @@ import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import type { PrivacySettings, RetentionPurgeResponse, User, UserRole } from '@/types'
+import type { ErasureRequest, PrivacySettings, RetentionPurgeResponse, User, UserRole } from '@/types'
 
 interface SectionRemapResponse {
   dry_run: boolean
@@ -31,6 +34,7 @@ interface SectionRemapResponse {
 }
 
 export default function PrivacyPage() {
+  const { isAdmin } = useAuth()
   const addToast = useAddToast()
   const [settings, setSettings] = useState<PrivacySettings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -58,6 +62,17 @@ export default function PrivacyPage() {
   const [newRole, setNewRole] = useState<UserRole>('recruiter')
   const [creatingUser, setCreatingUser] = useState(false)
 
+  // India DPDP Act — Erasure & Consent Requests
+  const [erasureRequests, setErasureRequests] = useState<ErasureRequest[]>([])
+  const [erasureLoading, setErasureLoading] = useState(false)
+  const [showNewErasure, setShowNewErasure] = useState(false)
+  const [erasureCandidateId, setErasureCandidateId] = useState('')
+  const [erasureType, setErasureType] = useState<'erasure' | 'consent_withdrawal' | 'data_export'>('erasure')
+  const [erasureReason, setErasureReason] = useState('')
+  const [creatingErasure, setCreatingErasure] = useState(false)
+  const [executeTarget, setExecuteTarget] = useState<ErasureRequest | null>(null)
+  const [executingErasure, setExecutingErasure] = useState(false)
+
   const loadSettings = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -84,10 +99,64 @@ export default function PrivacyPage() {
     }
   }, [])
 
+  const loadErasureRequests = useCallback(async () => {
+    setErasureLoading(true)
+    try {
+      const res = await api.get<ErasureRequest[]>('/privacy/erasure-requests')
+      setErasureRequests(res.data || [])
+    } catch {
+      // Non-blocking
+    } finally {
+      setErasureLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     void loadSettings()
     void loadUsers()
-  }, [loadSettings, loadUsers])
+    void loadErasureRequests()
+  }, [loadSettings, loadUsers, loadErasureRequests])
+
+  const handleCreateErasure = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!erasureCandidateId.trim()) {
+      addToast('Enter the candidate UUID to log an erasure request.', 'error')
+      return
+    }
+    setCreatingErasure(true)
+    try {
+      await api.post<ErasureRequest>('/privacy/erasure-requests', {
+        candidate_id: erasureCandidateId.trim(),
+        request_type: erasureType,
+        reason: erasureReason.trim(),
+      })
+      addToast('DPDP erasure / consent request logged', 'success')
+      setErasureCandidateId('')
+      setErasureReason('')
+      setShowNewErasure(false)
+      void loadErasureRequests()
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Failed to log DPDP request'), 'error')
+    } finally {
+      setCreatingErasure(false)
+    }
+  }
+
+  const handleExecuteErasure = async () => {
+    if (!executeTarget) return
+    setExecutingErasure(true)
+    try {
+      await api.post<ErasureRequest>(`/privacy/erasure-requests/${executeTarget.id}/execute`)
+      addToast('Candidate PII & resume deleted; PII-free DPDP compliance proof retained.', 'success')
+      setExecuteTarget(null)
+      void loadErasureRequests()
+      void loadSettings()
+    } catch (err) {
+      addToast(getErrorMessage(err, 'Failed to execute erasure request'), 'error')
+    } finally {
+      setExecutingErasure(false)
+    }
+  }
 
   const runDryRun = async () => {
     const days = Math.max(0, parseInt(daysInput, 10) || 0)
@@ -208,6 +277,7 @@ export default function PrivacyPage() {
             onClick={() => {
               void loadSettings()
               void loadUsers()
+              void loadErasureRequests()
             }}
             loading={loading}
           >
@@ -397,6 +467,147 @@ export default function PrivacyPage() {
         </CardContent>
       </Card>
 
+      {/* India DPDP Act — Erasure & Consent Requests */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FileWarning size={17} className="text-coral-600" />
+              <CardTitle>India DPDP Act — Erasure &amp; Consent Requests ({erasureRequests.length})</CardTitle>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setShowNewErasure((v) => !v)}>
+              <Plus size={14} />
+              {showNewErasure ? 'Close Form' : 'Log Request'}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs leading-5 text-slate-600">
+            Track candidate data erasure or consent-withdrawal requests. Executing a request
+            permanently deletes the candidate profile, parsed text, and stored CV file while
+            keeping a PII-free SHA-256 compliance proof (<code className="font-mono">candidate_ref_hash</code>).
+          </p>
+
+          {showNewErasure && (
+            <form
+              onSubmit={handleCreateErasure}
+              className="grid grid-cols-1 gap-3 rounded-xl border border-coral-200/80 bg-coral-50/30 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:items-end animate-fade-in"
+            >
+              <div className="space-y-1">
+                <Label htmlFor="dpdp-cand-id" className="text-xs">Candidate ID (UUID) *</Label>
+                <Input
+                  id="dpdp-cand-id"
+                  value={erasureCandidateId}
+                  onChange={(e) => setErasureCandidateId(e.target.value)}
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dpdp-type" className="text-xs">Request Type</Label>
+                <Select
+                  id="dpdp-type"
+                  value={erasureType}
+                  onChange={(e) =>
+                    setErasureType(e.target.value as 'erasure' | 'consent_withdrawal' | 'data_export')
+                  }
+                >
+                  <option value="erasure">Data Erasure (Right to be Forgotten)</option>
+                  <option value="consent_withdrawal">Consent Withdrawal</option>
+                  <option value="data_export">Data Access / Export</option>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dpdp-reason" className="text-xs">Reason / Ticket Ref</Label>
+                <Input
+                  id="dpdp-reason"
+                  value={erasureReason}
+                  onChange={(e) => setErasureReason(e.target.value)}
+                  placeholder="Candidate requested via email"
+                />
+              </div>
+              <Button type="submit" size="sm" loading={creatingErasure}>
+                Log Request
+              </Button>
+            </form>
+          )}
+
+          {erasureLoading && erasureRequests.length === 0 ? (
+            <div className="skeleton h-20 rounded-xl" />
+          ) : erasureRequests.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-stone-200 py-5 text-center text-xs text-slate-500">
+              No DPDP erasure or consent-withdrawal requests logged yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-stone-200/80">
+              <table className="min-w-full divide-y divide-stone-100 text-xs">
+                <thead className="bg-stone-50/80 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2.5">Ref Hash (PII-free)</th>
+                    <th className="px-4 py-2.5">Type</th>
+                    <th className="px-4 py-2.5">Status</th>
+                    <th className="px-4 py-2.5">Reason</th>
+                    <th className="px-4 py-2.5">Created</th>
+                    <th className="px-4 py-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100 bg-white">
+                  {erasureRequests.map((req) => (
+                    <tr key={req.id}>
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-slate-700">
+                        {req.candidate_ref_hash.slice(0, 12)}…
+                      </td>
+                      <td className="px-4 py-2.5 capitalize text-slate-700">
+                        {req.request_type.replace(/_/g, ' ')}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge
+                          variant={
+                            req.status === 'completed'
+                              ? 'success'
+                              : req.status === 'pending'
+                                ? 'warning'
+                                : 'secondary'
+                          }
+                          className="capitalize"
+                        >
+                          {req.status}
+                        </Badge>
+                      </td>
+                      <td className="max-w-xs truncate px-4 py-2.5 text-slate-600">
+                        {req.reason || '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-500">
+                        {new Date(req.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        {req.status === 'pending' && isAdmin ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setExecuteTarget(req)}
+                            className="h-7 border-red-200 px-2.5 text-[11px] text-red-600 hover:bg-red-50 hover:text-red-700"
+                          >
+                            <Trash2 size={12} />
+                            Execute Erasure
+                          </Button>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">
+                            {req.processed_at
+                              ? `Done ${new Date(req.processed_at).toLocaleDateString()}`
+                              : '—'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Retention Purge */}
         <Card>
@@ -542,6 +753,16 @@ export default function PrivacyPage() {
         loading={running}
         onConfirm={runPurge}
         onCancel={() => setConfirmPurge(false)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(executeTarget)}
+        title="Execute DPDP Erasure Request?"
+        description={`This permanently deletes the candidate profile, parsed text, and stored resume file for ref ${executeTarget?.candidate_ref_hash.slice(0, 12) ?? ''}… while retaining a PII-free compliance proof. This cannot be undone.`}
+        confirmLabel="Execute Erasure"
+        loading={executingErasure}
+        onConfirm={() => void handleExecuteErasure()}
+        onCancel={() => setExecuteTarget(null)}
       />
 
       <ConfirmDialog

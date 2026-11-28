@@ -18,13 +18,14 @@ import {
   Sparkles,
   Upload,
   Users,
+  Wand2,
   X,
 } from 'lucide-react'
 import { useCandidates } from '@/hooks/useCandidates'
 import { useAuth } from '@/contexts/AuthContext'
 import { useBlindMode } from '@/contexts/BlindModeContext'
 import { useAddToast } from '@/components/ui/Toast'
-import { api, downloadBlobFile } from '@/lib/api'
+import { api, downloadBlobFile, getErrorMessage } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { CandidateCard } from '@/components/CandidateCard'
 import { CandidateTable } from '@/components/CandidateTable'
@@ -36,7 +37,12 @@ import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { cn, formatYears } from '@/lib/utils'
-import type { CandidateSearchItem, InterviewItem, StuckCandidatesAnalytics } from '@/types'
+import type {
+  CandidateSearchItem,
+  InterviewItem,
+  NLSearchResponse,
+  StuckCandidatesAnalytics,
+} from '@/types'
 
 const PRESET_DOMAINS = [
   'Software Engineering',
@@ -82,6 +88,13 @@ export default function DashboardPage() {
   const [exportingXlsx, setExportingXlsx] = useState(false)
   const [upcomingInterviews, setUpcomingInterviews] = useState<InterviewItem[]>([])
   const [stuckSummary, setStuckSummary] = useState<StuckCandidatesAnalytics | null>(null)
+
+  // Natural-language search mode
+  const [nlMode, setNlMode] = useState(false)
+  const [nlQuery, setNlQuery] = useState('')
+  const [nlLoading, setNlLoading] = useState(false)
+  const [nlError, setNlError] = useState<string | null>(null)
+  const [nlResult, setNlResult] = useState<NLSearchResponse | null>(null)
 
   useEffect(() => {
     let active = true
@@ -165,8 +178,45 @@ export default function DashboardPage() {
     setSkills([])
     setMinYears('')
     setMaxYears('')
+    setNlQuery('')
+    setNlResult(null)
+    setNlError(null)
     setPage(1)
   }
+
+  const runNlSearch = useCallback(
+    async (queryText: string, targetPage = 1) => {
+      const trimmed = queryText.trim()
+      if (!trimmed) {
+        setNlResult(null)
+        setNlError(null)
+        return
+      }
+      setNlLoading(true)
+      setNlError(null)
+      try {
+        const res = await api.post<NLSearchResponse>('/candidates/nl-search', {
+          query: trimmed,
+          page: targetPage,
+          page_size: 18,
+          blind: blindMode,
+        })
+        setNlResult(res.data)
+      } catch (err) {
+        setNlError(getErrorMessage(err, 'Natural-language search failed'))
+      } finally {
+        setNlLoading(false)
+      }
+    },
+    [blindMode],
+  )
+
+  useEffect(() => {
+    if (nlMode && nlResult?.original_query) {
+      void runNlSearch(nlResult.original_query, nlResult.page)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blindMode])
 
   const toggleSkill = (skill: string) => {
     setPage(1)
@@ -175,9 +225,17 @@ export default function DashboardPage() {
     )
   }
 
+  const displayedCandidates = nlMode && nlResult ? nlResult.items : candidates
+  const displayedTotal = nlMode && nlResult ? nlResult.total : pagination.total
+  const displayedPage = nlMode && nlResult ? nlResult.page : pagination.page
+  const displayedPages = nlMode && nlResult ? nlResult.pages : pagination.pages
+  const isBusy = nlMode ? nlLoading : loading
+  const activeError = nlMode ? nlError : error
+
   const topDomain = stats?.domains[0]
   const topSkill = stats?.top_skills[0]
-  const isEmptyDatabase = !loading && !statsLoading && (stats?.total ?? 0) === 0 && activeFilterCount === 0
+  const isEmptyDatabase =
+    !isBusy && !statsLoading && (stats?.total ?? 0) === 0 && activeFilterCount === 0 && !nlResult
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return
@@ -490,7 +548,33 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {availableSkills.length > 0 && (
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNlMode(false)
+                    setNlError(null)
+                  }}
+                  className={cn(
+                    'rounded-md px-2.5 py-1 text-xs font-semibold transition',
+                    !nlMode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800',
+                  )}
+                >
+                  Filters
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNlMode(true)}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition',
+                    nlMode ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800',
+                  )}
+                >
+                  <Wand2 size={12} />
+                  Natural Language
+                </button>
+              </div>
+              {!nlMode && availableSkills.length > 0 && (
                 <Button
                   type="button"
                   variant={showSkillDrawer || skills.length > 0 ? 'soft' : 'outline'}
@@ -501,7 +585,7 @@ export default function DashboardPage() {
                   Skills{skills.length ? ` (${skills.length})` : ''}
                 </Button>
               )}
-              {activeFilterCount > 0 && (
+              {(activeFilterCount > 0 || nlResult) && (
                 <Button type="button" variant="ghost" size="sm" onClick={clearAllFilters}>
                   <X size={14} />
                   Reset
@@ -512,84 +596,165 @@ export default function DashboardPage() {
         </CardHeader>
 
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-            <div className="relative md:col-span-5">
-              <Search
-                size={15}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Hybrid search by name, skills, role, summary, or domain…"
-                className="pl-9 pr-8"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  aria-label="Clear search"
-                >
-                  <X size={14} />
-                </button>
+          {nlMode ? (
+            <div className="space-y-3">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void runNlSearch(nlQuery, 1)
+                }}
+                className="flex flex-col gap-2 sm:flex-row"
+              >
+                <div className="relative flex-1">
+                  <Wand2
+                    size={15}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-brand-500"
+                  />
+                  <Input
+                    value={nlQuery}
+                    onChange={(e) => setNlQuery(e.target.value)}
+                    placeholder='Try: "Python, 3+ yrs, Pune, notice < 30 days" or "React 2-5 years Bangalore"'
+                    className="pl-9 pr-8"
+                  />
+                  {nlQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNlQuery('')
+                        setNlResult(null)
+                        setNlError(null)
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label="Clear natural language query"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                <Button type="submit" loading={nlLoading} disabled={!nlQuery.trim()}>
+                  <Search size={14} />
+                  Search
+                </Button>
+              </form>
+
+              {nlResult && (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-brand-200/70 bg-brand-50/40 px-3 py-2 text-xs">
+                  <span className="font-semibold text-brand-800">Parsed filters:</span>
+                  {nlResult.parsed_filters.skills.map((sk) => (
+                    <Badge key={`nl-sk-${sk}`} variant="brand">
+                      Skill: {sk}
+                    </Badge>
+                  ))}
+                  {nlResult.parsed_filters.min_years != null && (
+                    <Badge variant="secondary">≥ {nlResult.parsed_filters.min_years} yrs</Badge>
+                  )}
+                  {nlResult.parsed_filters.max_years != null && (
+                    <Badge variant="secondary">≤ {nlResult.parsed_filters.max_years} yrs</Badge>
+                  )}
+                  {nlResult.parsed_filters.city && (
+                    <Badge variant="secondary">City: {nlResult.parsed_filters.city}</Badge>
+                  )}
+                  {nlResult.parsed_filters.max_notice_days != null && (
+                    <Badge variant="secondary">
+                      Notice ≤ {nlResult.parsed_filters.max_notice_days}d
+                    </Badge>
+                  )}
+                  {nlResult.parsed_filters.primary_domain && (
+                    <Badge variant="secondary">
+                      Domain: {nlResult.parsed_filters.primary_domain}
+                    </Badge>
+                  )}
+                  {nlResult.parsed_filters.semantic_query && (
+                    <Badge variant="outline">Query: {nlResult.parsed_filters.semantic_query}</Badge>
+                  )}
+                  <span className="ml-auto text-[11px] text-slate-500">
+                    via {nlResult.parser_mode === 'gemini' ? 'Gemini NL' : 'Deterministic NL'}
+                  </span>
+                </div>
               )}
             </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+                <div className="relative md:col-span-5">
+                  <Search
+                    size={15}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Hybrid search by name, skills, role, summary, or domain…"
+                    className="pl-9 pr-8"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label="Clear search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
 
-            <div className="md:col-span-3">
-              <Select
-                value={domain}
-                onChange={(e) => {
-                  setDomain(e.target.value)
-                  setPage(1)
-                }}
-              >
-                <option value="">All domains</option>
-                {allDomains.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </Select>
-            </div>
+                <div className="md:col-span-3">
+                  <Select
+                    value={domain}
+                    onChange={(e) => {
+                      setDomain(e.target.value)
+                      setPage(1)
+                    }}
+                  >
+                    <option value="">All domains</option>
+                    {allDomains.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
 
-            <div className="md:col-span-2">
-              <Input
-                type="number"
-                min={0}
-                value={minYears}
-                onChange={(e) => {
-                  setMinYears(e.target.value)
-                  setPage(1)
-                }}
-                placeholder="Min yrs"
-              />
-            </div>
+                <div className="md:col-span-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={minYears}
+                    onChange={(e) => {
+                      setMinYears(e.target.value)
+                      setPage(1)
+                    }}
+                    placeholder="Min yrs"
+                  />
+                </div>
 
-            <div className="md:col-span-2">
-              <Input
-                type="number"
-                min={0}
-                value={maxYears}
-                onChange={(e) => {
-                  setMaxYears(e.target.value)
-                  setPage(1)
-                }}
-                placeholder="Max yrs"
-              />
-            </div>
-          </div>
+                <div className="md:col-span-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={maxYears}
+                    onChange={(e) => {
+                      setMaxYears(e.target.value)
+                      setPage(1)
+                    }}
+                    placeholder="Max yrs"
+                  />
+                </div>
+              </div>
 
-          {showSkillDrawer && availableSkills.length > 0 && (
-            <SkillFilters
-              availableSkills={availableSkills}
-              selectedSkills={skills}
-              onToggleSkill={toggleSkill}
-              onClearSkills={() => {
-                setSkills([])
-                setPage(1)
-              }}
-            />
+              {showSkillDrawer && availableSkills.length > 0 && (
+                <SkillFilters
+                  availableSkills={availableSkills}
+                  selectedSkills={skills}
+                  onToggleSkill={toggleSkill}
+                  onClearSkills={() => {
+                    setSkills([])
+                    setPage(1)
+                  }}
+                />
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -597,15 +762,22 @@ export default function DashboardPage() {
       {/* Results Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-          <span className="font-semibold text-slate-900">{pagination.total}</span>
-          <span>candidate{pagination.total === 1 ? '' : 's'}</span>
-          {activeFilterCount > 0 && <span className="text-slate-400">matching filters</span>}
-          {searchMeta.active && (
+          <span className="font-semibold text-slate-900">{displayedTotal}</span>
+          <span>candidate{displayedTotal === 1 ? '' : 's'}</span>
+          {(activeFilterCount > 0 || (nlMode && nlResult)) && (
+            <span className="text-slate-400">matching filters</span>
+          )}
+          {nlMode && nlResult ? (
+            <Badge variant="brand" className="ml-1">
+              <Wand2 size={11} />
+              {nlResult.semantic_used ? 'NL + Semantic Hybrid' : 'NL Structured Search'}
+            </Badge>
+          ) : searchMeta.active ? (
             <Badge variant="brand" className="ml-1">
               <Sparkles size={11} />
               {searchMeta.semantic_used ? 'Hybrid Semantic + FTS' : 'Hybrid FTS + Fuzzy'}
             </Badge>
-          )}
+          ) : null}
         </div>
 
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -639,14 +811,14 @@ export default function DashboardPage() {
       </div>
 
       {/* Error Banner */}
-      {error && (
+      {activeError && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
-          {error}
+          {activeError}
         </div>
       )}
 
       {/* Loading Skeletons */}
-      {loading && (
+      {isBusy && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="rounded-2xl border bg-white p-5 shadow-card">
@@ -765,7 +937,7 @@ export default function DashboardPage() {
       )}
 
       {/* Filtered Empty State */}
-      {!loading && !isEmptyDatabase && candidates.length === 0 && (
+      {!isBusy && !isEmptyDatabase && displayedCandidates.length === 0 && (
         <div className="rounded-2xl border bg-white p-12 text-center shadow-card">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
             <Search size={22} />
@@ -781,9 +953,9 @@ export default function DashboardPage() {
       )}
 
       {/* Candidate Cards / Table */}
-      {!loading && candidates.length > 0 && view === 'grid' && (
+      {!isBusy && displayedCandidates.length > 0 && view === 'grid' && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {candidates.map((c) => (
+          {displayedCandidates.map((c) => (
             <CandidateCard
               key={c.id}
               candidate={c}
@@ -793,9 +965,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!loading && candidates.length > 0 && view === 'table' && (
+      {!isBusy && displayedCandidates.length > 0 && view === 'table' && (
         <CandidateTable
-          candidates={candidates}
+          candidates={displayedCandidates}
           onDelete={canWrite ? setDeleteTarget : undefined}
         />
       )}
@@ -811,18 +983,24 @@ export default function DashboardPage() {
       />
 
       {/* Pagination */}
-      {!loading && pagination.pages > 1 && (
+      {!isBusy && displayedPages > 1 && (
         <div className="flex items-center justify-between rounded-2xl border bg-white px-5 py-3 shadow-card">
           <p className="text-xs text-slate-500">
-            Page <span className="font-semibold text-slate-900">{pagination.page}</span> of{' '}
-            <span className="font-semibold text-slate-900">{pagination.pages}</span>
+            Page <span className="font-semibold text-slate-900">{displayedPage}</span> of{' '}
+            <span className="font-semibold text-slate-900">{displayedPages}</span>
           </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              disabled={pagination.page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={displayedPage <= 1}
+              onClick={() => {
+                if (nlMode && nlResult) {
+                  void runNlSearch(nlResult.original_query, Math.max(1, displayedPage - 1))
+                } else {
+                  setPage((p) => Math.max(1, p - 1))
+                }
+              }}
             >
               <ChevronLeft size={15} />
               Previous
@@ -830,8 +1008,17 @@ export default function DashboardPage() {
             <Button
               variant="outline"
               size="sm"
-              disabled={pagination.page >= pagination.pages}
-              onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
+              disabled={displayedPage >= displayedPages}
+              onClick={() => {
+                if (nlMode && nlResult) {
+                  void runNlSearch(
+                    nlResult.original_query,
+                    Math.min(displayedPages, displayedPage + 1),
+                  )
+                } else {
+                  setPage((p) => Math.min(displayedPages, p + 1))
+                }
+              }}
             >
               Next
               <ChevronRight size={15} />

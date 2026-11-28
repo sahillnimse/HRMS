@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
+  Award,
   Building2,
   Check,
   ChevronDown,
@@ -14,6 +15,7 @@ import {
   MapPin,
   Search,
   Sparkles,
+  Tag,
   Trash2,
   UserPlus,
   X,
@@ -22,7 +24,7 @@ import { useJobs } from '@/hooks/useJobs'
 import { useCandidates } from '@/hooks/useCandidates'
 import { useAuth } from '@/contexts/AuthContext'
 import { blindCandidateLabel, useBlindMode } from '@/contexts/BlindModeContext'
-import { downloadBlobFile } from '@/lib/api'
+import { api, downloadBlobFile } from '@/lib/api'
 import { useAddToast } from '@/components/ui/Toast'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { KanbanBoard } from '@/components/KanbanBoard'
@@ -35,7 +37,12 @@ import { Input } from '@/components/ui/Input'
 import { Avatar } from '@/components/ui/Avatar'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { cn, formatRelativeDate, formatYears } from '@/lib/utils'
-import type { ApplicationStage, JobStatus } from '@/types'
+import type {
+  ApplicationStage,
+  JobStatus,
+  ResurfacedCandidateItem,
+  ResurfaceResponse,
+} from '@/types'
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -63,7 +70,9 @@ export default function JobDetailPage() {
   } = useJobs()
   const { candidates, fetchCandidates } = useCandidates()
 
-  const [activeTab, setActiveTab] = useState<'kanban' | 'matches'>('kanban')
+  const [activeTab, setActiveTab] = useState<'kanban' | 'matches' | 'resurface'>('kanban')
+  const [resurfaced, setResurfaced] = useState<ResurfacedCandidateItem[]>([])
+  const [resurfaceLoading, setResurfaceLoading] = useState(false)
   const [compareIds, setCompareIds] = useState<string[]>([])
   const [expandedGapId, setExpandedGapId] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -124,6 +133,28 @@ export default function JobDetailPage() {
       void fetchJobMatches(id)
     }
   }, [id, fetchJobDetail, fetchJobMatches])
+
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    setResurfaceLoading(true)
+    api
+      .get<ResurfaceResponse>(`/jobs/${id}/resurface`, {
+        params: blindMode ? { blind: true } : undefined,
+      })
+      .then((res) => {
+        if (active) setResurfaced(res.data.candidates || [])
+      })
+      .catch(() => {
+        if (active) setResurfaced([])
+      })
+      .finally(() => {
+        if (active) setResurfaceLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [id, blindMode])
 
   useEffect(() => {
     if (showAddModal) {
@@ -231,6 +262,7 @@ export default function JobDetailPage() {
             : m,
         ),
       )
+      setResurfaced((prev) => prev.filter((c) => c.candidate_id !== candidateId))
       addToast(`Added ${created.candidate?.full_name || 'candidate'} to pipeline`, 'success')
     } else {
       addToast('Candidate could not be added (may already be in this job)', 'error')
@@ -464,6 +496,29 @@ export default function JobDetailPage() {
               )}
             >
               {matches.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('resurface')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold transition',
+              activeTab === 'resurface'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900',
+            )}
+          >
+            <Award size={14} />
+            Silver Medalists
+            <span
+              className={cn(
+                'rounded-full px-1.5 py-0.5 text-[10px]',
+                activeTab === 'resurface'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-100 text-slate-600',
+              )}
+            >
+              {resurfaced.length}
             </span>
           </button>
         </div>
@@ -760,6 +815,128 @@ export default function JobDetailPage() {
                             Add to Pipeline
                           </Button>
                         ) : null}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 3: Silver-Medalist Resurfacing */}
+      {activeTab === 'resurface' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-brand-200/70 bg-brand-50/40 px-4 py-3 text-xs text-slate-700">
+            <strong className="text-brand-900">Silver-Medalist Resurfacing:</strong> Surfaces
+            strong past candidates who reached <b>Interview</b> or <b>Offer</b> on other roles and
+            are not yet in this job&apos;s pipeline, ranked deterministically against this JD.
+          </div>
+
+          {resurfaceLoading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="skeleton h-24 w-full rounded-2xl" />
+              ))}
+            </div>
+          ) : resurfaced.length === 0 ? (
+            <div className="rounded-2xl border bg-white p-12 text-center shadow-card">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+                <Award size={22} />
+              </div>
+              <h3 className="text-base font-semibold text-slate-900">
+                No silver-medalist matches found yet
+              </h3>
+              <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+                Once candidates reach Interview or Offer stages on other job requisitions, high-fit
+                profiles will automatically surface here for one-click re-engagement.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {resurfaced.map((c) => {
+                const label = blindMode ? blindCandidateLabel(c.candidate_id) : c.full_name
+                return (
+                  <div
+                    key={c.candidate_id}
+                    className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-card transition hover:border-brand-300"
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <Avatar name={label} size="md" />
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              to={`/candidates/${c.candidate_id}`}
+                              className="truncate text-sm font-semibold text-slate-900 hover:text-brand-700"
+                            >
+                              {label}
+                            </Link>
+                            <Badge variant="brand" className="capitalize">
+                              Past {c.past_highest_stage} · {c.past_job_title}
+                            </Badge>
+                            <span className="text-xs text-slate-500">
+                              {c.primary_domain} · {formatYears(c.years_experience)}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-slate-600">{c.why}</p>
+
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            {c.matched_required_skills.map((sk) => (
+                              <span
+                                key={`rm-${c.candidate_id}-${sk}`}
+                                className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-emerald-200/70"
+                              >
+                                {sk}
+                              </span>
+                            ))}
+                            {c.missing_required_skills.slice(0, 4).map((sk) => (
+                              <span
+                                key={`rmis-${c.candidate_id}-${sk}`}
+                                className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-rose-200/70"
+                              >
+                                Missing: {sk}
+                              </span>
+                            ))}
+                            {c.talent_pools.map((pool) => (
+                              <span
+                                key={`rpool-${c.candidate_id}-${pool}`}
+                                className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-800"
+                              >
+                                <Tag size={10} />
+                                {pool}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-3 lg:flex-col lg:items-end">
+                        <Badge
+                          variant={
+                            c.match_score >= 70
+                              ? 'success'
+                              : c.match_score >= 45
+                                ? 'brand'
+                                : 'secondary'
+                          }
+                          className="text-xs font-bold"
+                        >
+                          {Math.round(c.match_score)}% match
+                        </Badge>
+                        {canWrite && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            loading={addingId === c.candidate_id}
+                            onClick={() => void handleAddCandidate(c.candidate_id)}
+                          >
+                            <UserPlus size={13} />
+                            Add to Pipeline
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>

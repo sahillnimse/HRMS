@@ -12,6 +12,8 @@ DELETE /api/v1/resumes/{resume_file_id}      - Delete an unattached pending resu
 POST   /api/v1/resumes/cleanup               - Trigger orphan pending file cleanup (admin)
 """
 
+import base64
+import hmac
 from io import BytesIO
 import os
 from pathlib import Path
@@ -19,15 +21,20 @@ from typing import List, Optional
 import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
 from app.core.config import settings
+from app.core.security import decode_access_token
+from app.crud.backlog import list_inbound_email_logs
+from app.crud.user import get_user_by_id
+from app.models.backlog import InboundEmailLog
 from app.models.candidate import Candidate, ParseJob, ParseJobStatus, ResumeFile, ResumeFileStatus
 from app.models.user import User, UserRole
+from app.schemas.backlog import InboundEmailLogResponse, InboundEmailWebhookPayload
 from app.schemas.candidate import (
     BulkUploadResponse,
     ParseJobItem,
@@ -334,3 +341,135 @@ async def trigger_orphan_cleanup(
     """Admin-only: immediately purge pending resume files older than `max_age_hours`."""
     deleted = await cleanup_orphan_resumes(db, max_age_hours=max_age_hours)
     return {"deleted": deleted, "max_age_hours": max_age_hours}
+
+
+@router.get("/inbound-logs", response_model=List[InboundEmailLogResponse])
+async def get_inbound_email_logs_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(*WRITE_ROLES)),
+):
+    """List recent email-to-inbox CV ingestion events (domain-only, no PII)."""
+    return await list_inbound_email_logs(db, limit=limit)
+
+
+@router.post(
+    "/inbound-email",
+    response_model=InboundEmailLogResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_inbound_email_resumes(
+    payload: InboundEmailWebhookPayload,
+    background_tasks: BackgroundTasks,
+    x_inbound_webhook_secret: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Email-to-inbox CV ingestion webhook (for Mailgun / Postmark / n8n / IMAP forwarders).
+    Authenticates via `X-Inbound-Webhook-Secret` matching `INBOUND_EMAIL_WEBHOOK_SECRET`
+    OR an `admin`/`recruiter` Bearer JWT. Deduplicates by `message_id` and queues PDF/DOCX
+    attachments into the bulk review queue (`parse_jobs`).
+    """
+    actor_id: Optional[UUID] = None
+    configured_secret = (settings.INBOUND_EMAIL_WEBHOOK_SECRET or "").strip()
+    secret_ok = bool(
+        configured_secret
+        and x_inbound_webhook_secret
+        and hmac.compare_digest(x_inbound_webhook_secret.strip(), configured_secret)
+    )
+    if not secret_ok:
+        if authorization and authorization.lower().startswith("bearer "):
+            token_str = authorization.split(" ", 1)[1].strip()
+            try:
+                claims = decode_access_token(token_str)
+                if not claims or not claims.get("sub"):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid inbound webhook secret or bearer token",
+                    )
+                uid = UUID(str(claims.get("sub")))
+                user = await get_user_by_id(db, uid)
+                if not user or not user.is_active or user.role not in WRITE_ROLES:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+                actor_id = user.id
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid inbound webhook secret or bearer token",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing valid X-Inbound-Webhook-Secret or Bearer token",
+            )
+
+    msg_id = payload.message_id.strip()[:255]
+    existing = (
+        await db.execute(select(InboundEmailLog).where(InboundEmailLog.message_id == msg_id))
+    ).scalar_one_or_none()
+    if existing:
+        return InboundEmailLogResponse.model_validate(existing)
+
+    raw_from = (payload.from_email or "").strip()
+    from_domain = (raw_from.split("@")[-1].lower()[:120] if "@" in raw_from else "unknown") or "unknown"
+
+    batch_id = uuid.uuid4()
+    created_jobs: List[ParseJob] = []
+
+    for att in payload.attachments[: settings.BULK_UPLOAD_MAX_FILES]:
+        ext = os.path.splitext(att.filename or "")[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            continue
+        try:
+            file_bytes = base64.b64decode(att.content_base64, validate=True)
+        except Exception:
+            continue
+        if not file_bytes or len(file_bytes) > MAX_FILE_SIZE:
+            continue
+
+        file_meta = await storage.save_file(
+            file_bytes=file_bytes,
+            original_filename=att.filename,
+            content_type=att.content_type or "application/octet-stream",
+        )
+        rf = ResumeFile(
+            original_filename=file_meta["original_filename"],
+            stored_filename=file_meta["stored_filename"],
+            file_path=file_meta["file_path"],
+            file_size=file_meta["file_size"],
+            content_type=file_meta["content_type"],
+            status=ResumeFileStatus.pending.value,
+        )
+        db.add(rf)
+        await db.flush()
+
+        job = ParseJob(
+            batch_id=batch_id,
+            resume_file_id=rf.id,
+            original_filename=rf.original_filename,
+            status=ParseJobStatus.queued.value,
+            created_by=actor_id,
+        )
+        db.add(job)
+        created_jobs.append(job)
+
+    log_entry = InboundEmailLog(
+        message_id=msg_id,
+        from_domain=from_domain,
+        subject=(payload.subject or "").strip()[:255],
+        attachment_count=len(created_jobs),
+        parse_batch_id=batch_id if created_jobs else None,
+        status="processed" if created_jobs else "ignored",
+        error=None if created_jobs else "No valid PDF/DOCX attachments found",
+    )
+    db.add(log_entry)
+    await db.commit()
+    await db.refresh(log_entry)
+
+    if created_jobs:
+        await enqueue_parse_jobs([j.id for j in created_jobs], background_tasks)
+
+    return InboundEmailLogResponse.model_validate(log_entry)
