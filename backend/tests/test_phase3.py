@@ -159,6 +159,8 @@ async def test_bulk_upload_queue_and_polling(
     monkeypatch.setattr("app.services.bulk_parse.GeminiParser.parse_resume", fake_parse)
     monkeypatch.setattr("app.services.bulk_parse.AsyncSessionLocal", db_session_factory)
     monkeypatch.setattr(settings, "REDIS_URL", None)
+    # GeminiParser() raises without a key (as on CI); parse_resume is faked, so any dummy key works
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key-not-used")
 
     pdf1 = _make_pdf_bytes("Alice Resume — Senior Python Engineer with FastAPI and Docker skills.")
     pdf2 = _make_pdf_bytes("Bob Resume — Backend Engineer specializing in PostgreSQL and Python.")
